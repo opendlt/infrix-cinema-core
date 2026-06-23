@@ -1,0 +1,40 @@
+{
+  "name": "@infrix/cinema-core",
+  "version": "0.1.0",
+  "description": "Canonical Infrix Cinema visualization core — the single renderer, vocabulary, disclosure view, and mount/loader shared by the Nexus SPA, the browser extension, and the @infrix/cinema-embed SDK widget.",
+  "type": "module",
+  "license": "MIT",
+  "main": "loader.js",
+  "exports": {
+    ".": "./loader.js",
+    "./*": "./*"
+  },
+  "files": [
+    "*.js",
+    "*.css",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": false
+  },
+  "scripts": {
+    "build": "node -e \"process.stdout.write('@infrix/cinema-core: static assets, no build step\\n')\"",
+    "test": "node --test \"*.test.mjs\""
+  },
+  "keywords": [
+    "infrix",
+    "cinema",
+    "visualization",
+    "accumulate",
+    "governance"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/opendlt/infrix-cinema-core.git"
+  },
+  "sideEffects": [
+    "*.js",
+    "*.css"
+  ]
+}
