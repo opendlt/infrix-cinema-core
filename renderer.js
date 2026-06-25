@@ -15,6 +15,10 @@
 (function (root) {
   'use strict';
 
+  // Canvas font strings must be concrete — ctx.font does NOT resolve CSS var().
+  const FONT_UI = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  const FONT_MONO = 'SFMono-Regular, Menlo, Consolas, monospace';
+
 class CinemaRenderer {
     constructor(canvas) {
         this.canvas = canvas;
@@ -36,17 +40,48 @@ class CinemaRenderer {
         this.nodeEntryTimes = new Map();  // nodeId -> performance.now()
         this.edgeEntryTimes = new Map();  // "from→to" -> performance.now()
 
+        // HiDPI (A3): backing store is scaled by devicePixelRatio; cssWidth/Height
+        // are the logical pixels every coordinate calculation uses.
+        this.dpr = 1;
+        this.cssWidth = 0;
+        this.cssHeight = 0;
+        // Layout lanes (A1) drawn behind the graph in spine mode.
+        this._lanes = null;
+        // Per-node rendered radius cache (label anchoring + future hit-testing).
+        this._nodeRenderRadius = new Map();
+        // Label candidates collected during drawGraph, placed in render() (A5).
+        this._labelCandidates = [];
+
         this.resizeCanvas();
-        window.addEventListener('resize', () => this.resizeCanvas());
+        this._onResize = () => this.resizeCanvas();
+        if (typeof ResizeObserver !== 'undefined' && this.canvas.parentElement) {
+            this._resizeObserver = new ResizeObserver(this._onResize);
+            this._resizeObserver.observe(this.canvas.parentElement);
+        } else {
+            window.addEventListener('resize', this._onResize);
+        }
         this.setupInteraction();
         this.startAnimationLoop();
     }
 
     resizeCanvas() {
-        this.canvas.width = this.canvas.parentElement.clientWidth;
-        this.canvas.height = this.canvas.parentElement.clientHeight;
+        const parent = this.canvas.parentElement;
+        const cssW = (parent ? parent.clientWidth : this.canvas.width) || 0;
+        const cssH = (parent ? parent.clientHeight : this.canvas.height) || 0;
+        const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+        this.dpr = dpr;
+        this.cssWidth = cssW;
+        this.cssHeight = cssH;
+        this.canvas.width = Math.max(1, Math.round(cssW * dpr));
+        this.canvas.height = Math.max(1, Math.round(cssH * dpr));
+        this.canvas.style.width = cssW + 'px';
+        this.canvas.style.height = cssH + 'px';
         this.requestRender();
     }
+
+    /** setLayoutLanes stores spine-lane metadata (from layout.js) to draw behind
+     *  the graph; null clears it. */
+    setLayoutLanes(lanes) { this._lanes = (lanes && lanes.length) ? lanes : null; }
 
     setSceneGraph(graph) {
         const isFirst = !this.sceneGraph;
@@ -101,8 +136,8 @@ class CinemaRenderer {
         const graphW = maxX - minX || 1;
         const graphH = maxY - minY || 1;
         const padded = 0.85; // leave 15% padding
-        const zoomX = (this.canvas.width * padded) / graphW;
-        const zoomY = (this.canvas.height * padded) / graphH;
+        const zoomX = (this.cssWidth * padded) / graphW;
+        const zoomY = (this.cssHeight * padded) / graphH;
         this.camera.zoom = Math.min(zoomX, zoomY, 2.0);
         // Center on graph midpoint
         const cx = (minX + maxX) / 2;
@@ -181,19 +216,29 @@ class CinemaRenderer {
     }
 
     render() {
-        const { ctx, canvas, camera } = this;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const { ctx, camera } = this;
+        const w = this.cssWidth, h = this.cssHeight;
+        // Establish a CSS-pixel coordinate space scaled by dpr so everything is
+        // crisp on HiDPI displays (A3); all math below is in logical pixels.
+        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
 
-        // Background gradient
-        const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        // Background gradient + subtle vignette for depth.
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
         grad.addColorStop(0, '#0a0a1a');
         grad.addColorStop(1, '#0e0e24');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, w, h);
 
         ctx.save();
-        ctx.translate(canvas.width / 2 + camera.x, canvas.height / 2 + camera.y);
+        ctx.translate(w / 2 + camera.x, h / 2 + camera.y);
         ctx.scale(camera.zoom, camera.zoom);
+
+        // Spine lanes (A1) sit behind everything.
+        if (this._lanes) this.drawLanes(this._lanes);
+
+        this._labelCandidates = [];
+        this._nodeRenderRadius.clear();
 
         // Ghost overlay (translucent)
         if (this.ghostGraph) {
@@ -208,7 +253,36 @@ class CinemaRenderer {
         }
 
         ctx.restore();
+
+        // Labels are drawn last, in screen space, with collision avoidance (A5).
+        this.drawLabels();
         this.drawHUD();
+    }
+
+    // drawLanes paints faint vertical bands + headers for the spine layout so
+    // the graph reads as the governance pipeline Intent → … → Witness.
+    drawLanes(lanes) {
+        const { ctx } = this;
+        const laneW = 240;
+        for (const lane of lanes) {
+            const x = lane.x;
+            const y0 = lane.y0, y1 = lane.y1;
+            ctx.fillStyle = 'rgba(255,255,255,0.018)';
+            ctx.fillRect(x - laneW / 2, y0, laneW, Math.max(0, y1 - y0));
+            // lane divider
+            ctx.strokeStyle = 'rgba(140,148,189,0.10)';
+            ctx.lineWidth = 1 / this.camera.zoom;
+            ctx.beginPath();
+            ctx.moveTo(x - laneW / 2, y0);
+            ctx.lineTo(x - laneW / 2, y1);
+            ctx.stroke();
+            // header (drawn at constant-ish size via inverse zoom)
+            ctx.fillStyle = 'rgba(170,178,209,0.55)';
+            const fs = Math.max(11, 13 / this.camera.zoom);
+            ctx.font = `600 ${fs}px ${FONT_UI}`;
+            ctx.textAlign = 'center';
+            ctx.fillText(String(lane.label).toUpperCase(), x, y0 - 8);
+        }
     }
 
     drawGraph(graph, isGhost) {
@@ -277,22 +351,20 @@ class CinemaRenderer {
             ctx.lineWidth = thickness;
             ctx.stroke();
 
-            // Edge label with call count
-            const midX = (from.position.x + to.position.x) / 2;
-            const midY = (from.position.y + to.position.y) / 2 - thickness - 6;
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 11px monospace';
-            ctx.textAlign = 'center';
-            const callLabel = traffic.count > 1
-                ? `${traffic.label} (×${traffic.count})`
-                : traffic.label;
-            ctx.fillText(callLabel, midX, midY);
-
-            // Gas cost label
-            if (traffic.totalGas > 0) {
-                ctx.fillStyle = '#f0a030';
-                ctx.font = '9px monospace';
-                ctx.fillText(`${traffic.totalGas.toLocaleString()} gas`, midX, midY + 14);
+            // Edge label collected for the screen-space de-clutter pass (A5).
+            if (!isGhost && traffic.label) {
+                const midX = (from.position.x + to.position.x) / 2;
+                const midY = (from.position.y + to.position.y) / 2;
+                const isHov = this.hoveredEdge && this.hoveredEdge.fromId === traffic.fromId && this.hoveredEdge.toId === traffic.toId;
+                const callLabel = traffic.count > 1 ? `${traffic.label} (×${traffic.count})` : traffic.label;
+                this._labelCandidates.push({
+                    kind: 'edge', wx: midX, wy: midY, anchorPx: 0,
+                    text: callLabel,
+                    sub: traffic.totalGas > 0 ? `${traffic.totalGas.toLocaleString()} gas` : '',
+                    color: '#e8ebf7', subColor: '#f0a030',
+                    priority: 100 + traffic.count, force: !!isHov,
+                    minZoom: isHov ? 0 : 0.7,
+                });
             }
 
             // Animated particles -- more particles for higher traffic
@@ -342,6 +414,9 @@ class CinemaRenderer {
 
             const c = node.color || { r: 80, g: 200, b: 120, a: 255 };
             const alpha = (node.opacity || 1) * (c.a || 255) / 255 * entryAlpha;
+
+            // Cache the actual rendered radius (label anchoring + hit testing).
+            if (!isGhost) this._nodeRenderRadius.set(node.id, radius);
 
             // Quarantine shake offset
             let sx = 0, sy = 0;
@@ -462,15 +537,72 @@ class CinemaRenderer {
                 ctx.textBaseline = 'alphabetic';
             }
 
-            // Label
-            if (node.label && entryAlpha > 0.5) {
-                ctx.fillStyle = `rgba(204,204,204,${entryAlpha})`;
-                ctx.font = `${Math.max(9, 10 / this.camera.zoom)}px monospace`;
-                ctx.textAlign = 'center';
-                const label = node.label.length > 20 ? node.label.slice(0, 18) + '..' : node.label;
-                ctx.fillText(label, nx, ny + radius + 14);
+            // Label collected for the screen-space de-clutter pass (A5). Selected
+            // / hovered nodes are forced; active nodes get priority; the rest are
+            // subject to semantic-zoom gating + collision skipping.
+            if (!isGhost && node.label && entryAlpha > 0.5) {
+                const label = node.label.length > 22 ? node.label.slice(0, 20) + '…' : node.label;
+                const important = this.selectedNode === node.id || this.hoveredNode === node.id;
+                this._labelCandidates.push({
+                    kind: 'node', wx: nx, wy: ny, anchorPx: radius * this.camera.zoom + 11,
+                    text: label, sub: '', color: '#cdd2e6', subColor: '#cdd2e6',
+                    priority: (important ? 1e6 : 0) + activity * 10 + (node.size || 10),
+                    force: important,
+                    minZoom: (important || activity > 2) ? 0 : 0.55,
+                });
             }
         });
+    }
+
+    // drawLabels projects collected label candidates to screen space and places
+    // them greedily, skipping any that would overlap one already placed — so a
+    // busy graph never becomes an unreadable pile of text (A5). Forced labels
+    // (selected/hovered) always render; everything else respects semantic zoom.
+    drawLabels() {
+        const { ctx, camera } = this;
+        if (!this._labelCandidates || !this._labelCandidates.length) return;
+        const w = this.cssWidth, h = this.cssHeight;
+        const project = (wx, wy) => ({ x: w / 2 + camera.x + wx * camera.zoom, y: h / 2 + camera.y + wy * camera.zoom });
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        const FS = 11, PAD_X = 5, LINE = 13;
+
+        // Build screen-space rects; drop candidates failing semantic-zoom gate or
+        // off-screen, then place by priority with collision avoidance.
+        const candidates = [];
+        ctx.font = `${FS}px var(--cinema-font-ui, sans-serif)`;
+        for (const c of this._labelCandidates) {
+            if (!c.force && camera.zoom < (c.minZoom || 0)) continue;
+            const p = project(c.wx, c.wy);
+            if (p.x < -80 || p.x > w + 80 || p.y < -40 || p.y > h + 40) continue;
+            const tw = ctx.measureText(c.text).width;
+            const lines = c.sub ? 2 : 1;
+            const halfW = tw / 2 + PAD_X;
+            const top = c.kind === 'node' ? p.y + c.anchorPx - FS : p.y - LINE - 2;
+            candidates.push({
+                c, x: p.x, top,
+                rect: { x1: p.x - halfW, y1: top - 2, x2: p.x + halfW, y2: top + lines * LINE },
+            });
+        }
+        const placed = ns.placeLabels(candidates.map((it, i) => ({ id: i, priority: it.c.priority, force: it.c.force, rect: it.rect })));
+
+        for (let i = 0; i < candidates.length; i++) {
+            if (!placed.has(i)) continue;
+            const it = candidates[i];
+            // subtle shadow for legibility against the graph
+            ctx.fillStyle = 'rgba(8,9,16,0.66)';
+            const r = it.rect;
+            ctx.fillRect(r.x1, r.y1, r.x2 - r.x1, (it.c.sub ? 2 : 1) * LINE + 2);
+            ctx.font = `${FS}px ${FONT_UI}`;
+            ctx.fillStyle = it.c.color;
+            ctx.fillText(it.c.text, it.x, it.top + FS);
+            if (it.c.sub) {
+                ctx.font = `${FS - 1}px ${FONT_MONO}`;
+                ctx.fillStyle = it.c.subColor;
+                ctx.fillText(it.c.sub, it.x, it.top + FS + LINE);
+            }
+        }
     }
 
     drawFlowParticle(from, to, edge, color) {
@@ -573,8 +705,8 @@ class CinemaRenderer {
     hitTestNode(clientX, clientY) {
         if (!this.sceneGraph || !this.sceneGraph.nodes) return null;
         const rect = this.canvas.getBoundingClientRect();
-        const cx = (clientX - rect.left - this.canvas.width / 2 - this.camera.x) / this.camera.zoom;
-        const cy = (clientY - rect.top - this.canvas.height / 2 - this.camera.y) / this.camera.zoom;
+        const cx = (clientX - rect.left - this.cssWidth / 2 - this.camera.x) / this.camera.zoom;
+        const cy = (clientY - rect.top - this.cssHeight / 2 - this.camera.y) / this.camera.zoom;
 
         let nodes = this.sceneGraph.nodes;
         if (!Array.isArray(nodes)) nodes = Object.values(nodes);
@@ -591,8 +723,8 @@ class CinemaRenderer {
     hitTestEdge(clientX, clientY) {
         if (!this._edgeTraffic || !this._nodeMap) return null;
         const rect = this.canvas.getBoundingClientRect();
-        const mx = (clientX - rect.left - this.canvas.width / 2 - this.camera.x) / this.camera.zoom;
-        const my = (clientY - rect.top - this.canvas.height / 2 - this.camera.y) / this.camera.zoom;
+        const mx = (clientX - rect.left - this.cssWidth / 2 - this.camera.x) / this.camera.zoom;
+        const my = (clientY - rect.top - this.cssHeight / 2 - this.camera.y) / this.camera.zoom;
         const threshold = 10 / this.camera.zoom;
 
         let closest = null, closestDist = threshold;
@@ -654,10 +786,37 @@ class CinemaRenderer {
 
     destroy() {
         if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
+        if (this._resizeObserver) { try { this._resizeObserver.disconnect(); } catch (e) {} this._resizeObserver = null; }
+        else if (this._onResize) { window.removeEventListener('resize', this._onResize); }
     }
 }
 
+  // rectsIntersect / placeLabels are pure helpers (unit-tested in
+  // labelLayout.test.mjs) powering the screen-space label de-clutter pass (A5).
+  function rectsIntersect(a, b) {
+    return !(a.x2 <= b.x1 || b.x2 <= a.x1 || a.y2 <= b.y1 || b.y2 <= a.y1);
+  }
+  // placeLabels takes [{id, priority, force, rect}] and returns a Set of the ids
+  // that fit without overlapping. Forced labels are always placed (and reserve
+  // their space first); the rest are placed highest-priority-first, skipping any
+  // that would collide with an already-placed rect.
+  function placeLabels(items) {
+    const sorted = items.slice().sort((a, b) =>
+      ((b.force ? 1 : 0) - (a.force ? 1 : 0)) || (b.priority - a.priority));
+    const placedRects = [];
+    const ids = new Set();
+    for (const it of sorted) {
+      if (it.force) { placedRects.push(it.rect); ids.add(it.id); continue; }
+      let ok = true;
+      for (const r of placedRects) { if (rectsIntersect(it.rect, r)) { ok = false; break; } }
+      if (ok) { placedRects.push(it.rect); ids.add(it.id); }
+    }
+    return ids;
+  }
+
   const ns = (root.InfrixCinema = root.InfrixCinema || {});
   ns.CinemaRenderer = CinemaRenderer;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { CinemaRenderer };
+  ns.placeLabels = placeLabels;
+  ns.rectsIntersect = rectsIntersect;
+  if (typeof module !== 'undefined' && module.exports) module.exports = { CinemaRenderer, placeLabels, rectsIntersect };
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

@@ -92,6 +92,105 @@
     // ---- Legend ----
     const legend = new ns.CinemaLegend(stage);
 
+    // ---- Stage state overlay (A4): loading / empty / empty-filter / error ----
+    const overlay = ns.CinemaStateOverlay ? new ns.CinemaStateOverlay(stage) : null;
+    let connectionState = caps.connect ? 'idle' : (caps.live ? 'connecting' : 'idle');
+    let everConnected = false;
+    let connError = '';
+    let filterActive = false;
+
+    // ---- Layout engine (A1) ----
+    const layoutController = ns.LayoutController ? new ns.LayoutController(renderer) : null;
+    let layoutEngine = readLayout() || 'auto';
+    let firstScene = true;
+
+    function nodeCountNow() { const g = renderer.sceneGraph; return g ? countNodes(g) : 0; }
+    function getEvents() { return (narrative && narrative.events) || []; }
+
+    function refreshOverlay() {
+      if (!overlay || !ns.resolveState) return;
+      const state = ns.resolveState({
+        nodeCount: nodeCountNow(), filterActive, connection: connectionState,
+        everConnected, expectsConnection: !!(caps.connect || caps.live),
+      });
+      if (state === 'error') {
+        overlay.set('error', { message: connError || undefined, actionLabel: 'Retry', onAction: retryConnect });
+      } else if (state === 'empty-filter') {
+        overlay.set('empty-filter', { onAction: clearFilter });
+      } else if (state === 'empty') {
+        if (caps.connect) overlay.set('empty', { actionLabel: 'Connect', onAction: openConnect });
+        else overlay.set('empty');
+      } else {
+        overlay.set(state); // 'loading' or 'hidden'
+      }
+    }
+
+    function onConnectionState(state, info) {
+      connectionState = state;
+      if (state === 'connected') everConnected = true;
+      if (state === 'error') connError = (info && info.fatal)
+        ? 'The session could not be reached after several attempts.'
+        : 'The live connection dropped — Cinema is trying to reconnect.';
+      refreshOverlay();
+    }
+    options.onConnectionState = onConnectionState;
+
+    function retryConnect() {
+      const ds = dataSource;
+      if (ds && ds.client && ds.client.connect) { connectionState = 'connecting'; refreshOverlay(); ds.client.connect(); }
+    }
+    function clearFilter() {
+      const search = rootEl.querySelector('#cinema-search');
+      if (search) search.value = '';
+      filterActive = false;
+      applyFilter(renderer, '');
+      refreshOverlay();
+    }
+    function openConnect() {
+      const dlg = rootEl.querySelector('#connect-dialog');
+      if (dlg) dlg.classList.remove('hidden');
+    }
+
+    // applyLayout decides the engine: 'auto' respects server positions when every
+    // node already has one, and computes a layout when any is missing; an explicit
+    // Spine/Force choice always (re)lays out, even over server coordinates.
+    function applyLayout(graph, o) {
+      if (!graph || !layoutController) return;
+      let eng = layoutEngine;
+      if (eng === 'auto') eng = ns.needsLayout(graph) ? 'auto' : 'none';
+      layoutController.apply(graph, eng, o || {});
+    }
+
+    function refreshTransport() {
+      if (!controls) return;
+      const evs = getEvents();
+      const lastSeq = evs.length ? (evs[evs.length - 1].sequence != null ? evs[evs.length - 1].sequence : evs.length - 1) : 0;
+      timeline.setTotal(lastSeq);
+      const g = renderer.sceneGraph;
+      const block = g ? (g.blockHeight || g.BlockHeight || 0) : 0;
+      controls.setTicks(evs);
+      controls.setPosition(timeline.state.currentSeq || 0, timeline.state.totalSeq || 0, block);
+    }
+
+    function stepEvent(dir) {
+      const evs = getEvents().map((e) => e.sequence || 0).sort((a, b) => a - b);
+      const cur = timeline.state.currentSeq || 0;
+      let target = cur;
+      if (dir > 0) { for (const s of evs) if (s > cur) { target = s; break; } }
+      else { for (let i = evs.length - 1; i >= 0; i--) if (evs[i] < cur) { target = evs[i]; break; } }
+      timeline.seek(target);
+    }
+    function jumpFailure() {
+      const evs = getEvents();
+      const f = evs.find((e) => e.status === 'failed') || evs[evs.length - 1];
+      if (f) timeline.seek(f.sequence || 0);
+    }
+
+    function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
+    function persistLayout(m) {
+      if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
+    }
+
     // ---- Data source resolution ----
     let dataSource = options.dataSource || buildDataSource(mode, options, disclosureContext);
 
@@ -117,7 +216,13 @@
     // ---- Timeline + export ----
     const timeline = new ns.TimelineAdapter({
       dataSource, renderer,
-      onPosition: (pos) => { if (sync) sync.onPosition(pos); },
+      onPosition: (pos) => {
+        if (sync) sync.onPosition(pos);
+        if (controls) {
+          const g = renderer.sceneGraph;
+          controls.setPosition(pos, timeline.state.totalSeq || 0, (g && (g.blockHeight || g.BlockHeight)) || 0);
+        }
+      },
     });
     const exporter = new ns.CinemaExport({ renderer, dataSource, mode, commit: options.commit, disclosureContext, timeline });
 
@@ -137,13 +242,21 @@
     if (!caps.readOnly) {
       controls = new ns.CinemaControls(controlsHost, {
         capabilities: caps,
+        initialLayout: layoutEngine,
         handlers: {
           togglePlay: () => { timeline.togglePlay(); controls.setPlaying(timeline.state.playing); },
           stepForward: () => timeline.stepForward(),
           stepBack: () => timeline.stepBackward(),
+          seek: (pos) => timeline.seek(pos),
+          setSpeed: (s) => timeline.setSpeed(s),
+          toggleLoop: (on) => timeline.setLoop(on),
+          jumpFailure: jumpFailure,
+          jumpEventNext: () => stepEvent(1),
+          jumpEventPrev: () => stepEvent(-1),
           fit: () => renderer.fitToView(),
           resetView: () => renderer.resetView(),
-          filter: (q) => applyFilter(renderer, q),
+          layout: (eng) => { layoutEngine = eng; persistLayout(eng); applyLayout(renderer.sceneGraph, { animate: true, fit: true }); },
+          filter: (q) => { filterActive = !!String(q || '').trim(); applyFilter(renderer, q); refreshOverlay(); },
           toggleLegend: () => legend.toggle(),
           export: () => openExportMenu(exporter, rootEl),
         },
@@ -153,11 +266,23 @@
     // ---- Scene wiring ----
     let unsubscribe = () => {};
     function onScene(g) {
-      if (g && g.__update) { renderer.applyUpdate(g.__update); return; }
+      if (g && g.__update) {
+        renderer.applyUpdate(g.__update);
+        // Place any newcomers that arrived without coordinates, without
+        // disturbing the rest (no animation/refit on incremental updates).
+        if (ns.needsLayout && ns.needsLayout(renderer.sceneGraph)) applyLayout(renderer.sceneGraph, { animate: false });
+        refreshTransport();
+        refreshOverlay();
+        return;
+      }
       renderer.setSceneGraph(g || {});
+      applyLayout(renderer.sceneGraph, { animate: !firstScene, fit: firstScene });
+      firstScene = false;
       if (narrative) {
         try { narrative.setScene(g || {}, { proof: options.proof || (dataSource && dataSource.proof) || null }); } catch (e) {}
       }
+      refreshTransport();
+      refreshOverlay();
     }
 
     function bind(ds) {
@@ -175,8 +300,10 @@
       const dialog = buildConnectDialog(options);
       rootEl.appendChild(dialog.el);
       dialog.onConnect((wsUrl, sessionId) => {
-        const ds = new ns.StandaloneCinemaDataSource({ wsUrl, sessionId, disclosureContext });
+        const ds = new ns.StandaloneCinemaDataSource({ wsUrl, sessionId, disclosureContext, onConnectionState });
         dialog.el.classList.add('hidden');
+        connectionState = 'connecting';
+        refreshOverlay();
         bind(ds);
       });
       if (options.autoConnect && options.wsUrl) dialog.connect(options.wsUrl, options.initialSessionId);
@@ -193,6 +320,10 @@
       onScene(safe);
     }
 
+    // Initial transport + overlay paint (before any scene arrives).
+    refreshTransport();
+    refreshOverlay();
+
     // Status loop.
     const statusTimer = setInterval(() => updateStatus(renderer, status), 500);
 
@@ -205,6 +336,9 @@
         try { unsubscribe(); } catch (e) {}
         clearInterval(statusTimer);
         timeline.destroy();
+        if (controls && controls.destroy) controls.destroy();
+        if (layoutController) layoutController.destroy();
+        if (overlay) overlay.destroy();
         if (sync) sync.destroy();
         if (narrative) narrative.destroy();
         renderer.destroy();

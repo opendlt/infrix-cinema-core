@@ -22,6 +22,8 @@ const SCRIPTS = [
   'narrativeTemplates.js',
   'narrativePanel.js',
   'narrativeSync.js',
+  'layout.js',
+  'cinemaStates.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];

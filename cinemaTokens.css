@@ -33,4 +33,10 @@
   --cinema-gap: 8px;
   --cinema-font-mono: 'SFMono-Regular', Menlo, Consolas, monospace;
   --cinema-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* motion (Tier A; expanded in Tier D) */
+  --cinema-dur-fast: 140ms;
+  --cinema-dur-base: 240ms;
+  --cinema-dur-slow: 420ms;
+  --cinema-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
