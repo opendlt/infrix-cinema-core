@@ -666,6 +666,43 @@
 .cinema-provenance-hop .cinema-detail-val { color: var(--cinema-anchor); }
 
 /* ============================================================
+ * Wave I — predicted-vs-actual / drift (I1), disclosure dial (I2)
+ * ============================================================ */
+
+/* I1 — drift summary chip + "drift only" toggle. */
+.cinema-drift-chip {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 7;
+  display: flex; align-items: center; gap: 10px; max-width: 86%;
+  padding: 6px 8px 6px 14px; border-radius: 999px;
+  background: color-mix(in srgb, var(--cinema-panel) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cinema-frozen) 45%, var(--cinema-border));
+  box-shadow: var(--cinema-shadow-2);
+}
+.cinema-drift-chip.hidden { display: none; }
+.cinema-drift-text { font-size: var(--cinema-fs-sm, 12px); color: var(--cinema-text); }
+.cinema-drift-only {
+  font-size: var(--cinema-fs-xs, 11px); font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  background: transparent; border: 1px solid var(--cinema-border); color: var(--cinema-muted);
+}
+.cinema-drift-only.active { background: var(--cinema-frozen); color: #fff; border-color: transparent; }
+
+/* I2 — disclosure dial (grant preview). */
+.cinema-disclosure-dial {
+  position: absolute; top: 40px; right: 10px; z-index: 6;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 60%;
+  padding: 5px 8px; border-radius: var(--cinema-radius);
+  background: color-mix(in srgb, var(--cinema-panel) 92%, transparent);
+  border: 1px solid var(--cinema-disclosure, #ffd700); box-shadow: var(--cinema-shadow-1);
+}
+.cinema-disclosure-dial.hidden { display: none; }
+.cinema-dial-label { font-size: var(--cinema-fs-xs, 11px); color: var(--cinema-muted); }
+.cinema-dial-chip, .cinema-dial-reset {
+  font-size: var(--cinema-fs-xs, 11px); padding: 2px 9px; border-radius: 999px; cursor: pointer;
+  background: var(--cinema-panel-2); border: 1px solid var(--cinema-border); color: var(--cinema-text);
+}
+.cinema-dial-chip.active { background: var(--cinema-disclosure, #ffd700); color: var(--cinema-accent-text); border-color: transparent; }
+
+/* ============================================================
  * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
  * ============================================================ */
 

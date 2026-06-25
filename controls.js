@@ -186,6 +186,14 @@
         bar.appendChild(verify);
       }
 
+      // Plan vs Actual (I1) — shown only when a captured plan is present.
+      if (this.caps.controls) {
+        const drift = this.btn('cinema-btn-drift', '⧉ Plan vs Actual', 'Compare what was predicted with what actually happened', () => this.fire('toggleDrift'));
+        drift.classList.add('hidden');
+        this._driftBtn = drift;
+        bar.appendChild(drift);
+      }
+
       bar.appendChild(this.btn('cinema-btn-legend', 'Legend', 'Toggle legend', () => this.fire('toggleLegend')));
       if (this.caps.controls || this.caps.replay) {
         bar.appendChild(this.btn('btn-screenshot', 'Export', 'Export / share', () => this.fire('export')));
@@ -247,6 +255,13 @@
 
     setStoryPlaying(on) {
       if (this._storyBtn) this._storyBtn.textContent = on ? '⏸ Pause story' : '▶ Play story';
+    }
+
+    setDriftAvailable(on) { if (this._driftBtn) this._driftBtn.classList.toggle('hidden', !on); }
+    setDriftActive(on) {
+      if (!this._driftBtn) return;
+      this._driftBtn.classList.toggle('cinema-btn-primary', on);
+      this._driftBtn.textContent = on ? '⧉ Exit compare' : '⧉ Plan vs Actual';
     }
 
     setLayout(engine) {

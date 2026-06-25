@@ -381,6 +381,117 @@
       if (sync && sync.clearHighlight) sync.clearHighlight();
     }
 
+    // ---- Wave I: Predicted-vs-Actual / drift (I1) ----
+    const driftView = ns.DriftView ? new ns.DriftView({ renderer }) : null;
+    let driftActive = false;
+    let driftOnlyActive = false;
+    let lastScene = null;
+    const driftChip = el('div', 'cinema-drift-chip hidden');
+    driftChip.id = 'cinema-drift-chip';
+    const driftText = el('span', 'cinema-drift-text'); driftChip.appendChild(driftText);
+    const driftOnlyBtn = document.createElement('button');
+    driftOnlyBtn.type = 'button'; driftOnlyBtn.className = 'cinema-drift-only'; driftOnlyBtn.textContent = 'Drift only';
+    driftOnlyBtn.addEventListener('click', () => applyDriftOnly(!driftOnlyActive));
+    driftChip.appendChild(driftOnlyBtn);
+    stage.appendChild(driftChip);
+
+    function planOf() { return options.plan || (options.proof && options.proof.plan) || (dataSource && dataSource.proof && dataSource.proof.plan) || null; }
+    function updateDriftAvailability() {
+      const avail = !!(driftView && ns.hasPlan && ns.hasPlan(renderer.sceneGraph, planOf()));
+      if (controls) controls.setDriftAvailable(avail);
+    }
+    function exitDrift() {
+      if (!driftActive) return;
+      if (driftOnlyActive) applyDriftOnly(false);
+      driftView.clear();
+      driftActive = false;
+      driftChip.classList.add('hidden');
+      if (controls) controls.setDriftActive(false);
+    }
+    function toggleDrift() {
+      if (!driftView) return;
+      if (driftActive) {
+        exitDrift();
+        if (lastScene) { renderer.setSceneGraph(lastScene); applyLayout(renderer.sceneGraph, { animate: false }); }
+      } else {
+        driftView.apply(renderer.sceneGraph, planOf());
+        driftActive = true;
+        driftText.textContent = driftView.summary || 'Plan vs actual';
+        driftOnlyBtn.classList.remove('active');
+        driftChip.classList.remove('hidden');
+        if (controls) controls.setDriftActive(true);
+      }
+    }
+    function applyDriftOnly(on) {
+      driftOnlyActive = on;
+      driftOnlyBtn.classList.toggle('active', on);
+      const ids = new Set(ns.driftedNodeIds ? ns.driftedNodeIds((driftView && driftView.drift) || { driftEdges: [] }) : []);
+      let nodes = renderer.sceneGraph ? (Array.isArray(renderer.sceneGraph.nodes) ? renderer.sceneGraph.nodes : Object.values(renderer.sceneGraph.nodes || {})) : [];
+      nodes.forEach((n) => {
+        if (n._origOpacity == null) n._origOpacity = (n.opacity != null ? n.opacity : 1);
+        n.opacity = on ? (ids.has(n.id) ? n._origOpacity : 0.12) : n._origOpacity;
+      });
+      renderer.requestRender();
+    }
+
+    // ---- Wave I: Disclosure-as-a-dial (I2) — only when a pre-disclosure scene
+    // is available (a host that ships the sealed payloads the viewer is entitled
+    // to under a grant). The preview never exceeds what the grant authorizes —
+    // it re-runs the SAME fail-closed applyDisclosure with a hypothetical grant set.
+    const rawScene = options.rawScene || (options.proof && options.proof.rawScene) || null;
+    let dialGrants = new Set();
+    const disclosureDial = el('div', 'cinema-disclosure-dial hidden');
+    disclosureDial.id = 'cinema-disclosure-dial';
+    stage.appendChild(disclosureDial);
+    function grantsInRaw() {
+      if (!rawScene) return [];
+      const nodes = Array.isArray(rawScene.nodes) ? rawScene.nodes : Object.values(rawScene.nodes || {});
+      const grants = new Set();
+      for (const n of nodes) { if (n.grantId) grants.add(n.grantId); if (n.kind === 'disclosure_grant') grants.add(n.id); }
+      return [...grants];
+    }
+    function previewDisclosure() {
+      if (!rawScene || !ns.applyDisclosure) return;
+      // Translate the selected grant ids into the grant KEYS applyDisclosure
+      // checks (owner / "url::label") for the nodes each grant covers — so the
+      // preview reveals exactly (and only) what the grant authorizes.
+      const granted = new Set();
+      const nodes = Array.isArray(rawScene.nodes) ? rawScene.nodes : Object.values(rawScene.nodes || {});
+      for (const n of nodes) {
+        if (n.grantId && dialGrants.has(n.grantId)) {
+          const owner = n.owner || n.url || '';
+          if (owner) granted.add(owner);
+          granted.add((n.url || '') + '::' + (n.label || n.id));
+        }
+      }
+      onScene(ns.applyDisclosure(rawScene, Object.assign({}, disclosureContext, { grants: granted })));
+    }
+    function buildDisclosureDial() {
+      const grants = grantsInRaw();
+      if (!grants.length) { disclosureDial.classList.add('hidden'); return; }
+      disclosureDial.replaceChildren();
+      const lab = el('span', 'cinema-dial-label'); lab.textContent = 'Preview as grant:'; disclosureDial.appendChild(lab);
+      for (const gid of grants) {
+        const chip = document.createElement('button');
+        chip.type = 'button'; chip.className = 'cinema-dial-chip'; chip.textContent = gid;
+        chip.addEventListener('click', () => {
+          if (dialGrants.has(gid)) dialGrants.delete(gid); else dialGrants.add(gid);
+          chip.classList.toggle('active', dialGrants.has(gid));
+          previewDisclosure();
+        });
+        disclosureDial.appendChild(chip);
+      }
+      const reset = document.createElement('button');
+      reset.type = 'button'; reset.className = 'cinema-dial-reset'; reset.textContent = 'Reset';
+      reset.addEventListener('click', () => {
+        dialGrants = new Set();
+        for (const c of disclosureDial.querySelectorAll('.cinema-dial-chip')) c.classList.remove('active');
+        previewDisclosure();
+      });
+      disclosureDial.appendChild(reset);
+      disclosureDial.classList.remove('hidden');
+    }
+
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
       if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
@@ -462,6 +573,7 @@
           export: () => openExportMenu(exporter, rootEl),
           playStory: () => { if (cinematic) cinematic.togglePlay(); },
           verify: () => openVerifyTheatre(),
+          toggleDrift: () => toggleDrift(),
         },
       });
       // Restore a persisted query so a returning operator keeps their filter.
@@ -522,6 +634,10 @@
       if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);
       updateTrustAura();
       updateSummary();
+      // A fresh full scene resets any active plan-vs-actual compare (I1).
+      if (driftActive) exitDrift();
+      lastScene = renderer.sceneGraph;
+      updateDriftAvailability();
       // Re-arm the cinematic shot list for the new scene (G1); a first-timer gets
       // the once-ever spotlight (G3).
       if (cinematic) { cinematic.exit(); cinematic.setShots(getEvents(), renderer.sceneGraph); }
@@ -574,6 +690,7 @@
     refreshOverlay();
     updateTrustAura();
     updateSummary();
+    buildDisclosureDial();
 
     // Status loop.
     const statusTimer = setInterval(() => updateStatus(renderer, status), 500);

@@ -89,6 +89,8 @@ class CinemaRenderer {
         this._anchorMoment = null;
         // Causal trace path (H2): Set of "from→to" keys lit as a golden chain.
         this._tracePath = null;
+        // Drift edges (I1): [{fromId(ghost), toId(actual), drift}] for plan-vs-actual.
+        this._driftEdges = null;
         // Motion hierarchy (D2): reduced-motion flag + the single attention node.
         this.reducedMotion = rendererReducedMotion();
         this._attentionFocus = null;
@@ -151,6 +153,36 @@ class CinemaRenderer {
     /** setTracePath lights a causal chain (H2); keys are "from→to" strings. */
     setTracePath(keys) { this._tracePath = (keys && keys.length) ? new Set(keys) : null; this._dirty = true; }
     clearTracePath() { this._tracePath = null; this._dirty = true; }
+
+    /** setDriftEdges draws predicted→actual divergence edges (I1). */
+    setDriftEdges(edges) { this._driftEdges = (edges && edges.length) ? edges : null; this._dirty = true; }
+    _indexNodes(graph) {
+        const m = new Map();
+        if (!graph) return m;
+        let nodes = graph.nodes || graph.Nodes;
+        if (!nodes) return m;
+        if (!Array.isArray(nodes)) nodes = Object.values(nodes);
+        for (const n of nodes) m.set(n.id, n);
+        return m;
+    }
+    _drawDriftEdges() {
+        const ctx = this.ctx;
+        const gmap = this._indexNodes(this.ghostGraph);
+        const amap = this._indexNodes(this.sceneGraph);
+        for (const e of this._driftEdges) {
+            if (!e.drift) continue;
+            const g = gmap.get(e.fromId), a = amap.get(e.toId);
+            if (!g || !a || !g.position || !a.position) continue;
+            ctx.beginPath();
+            ctx.moveTo(g.position.x, g.position.y);
+            ctx.lineTo(a.position.x, a.position.y);
+            ctx.strokeStyle = 'rgba(244,67,54,0.85)';
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([5, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
 
     setSceneGraph(graph) {
         const isFirst = !this.sceneGraph;
@@ -419,7 +451,8 @@ class CinemaRenderer {
             this.drawGraph(this.sceneGraph, false);
         }
 
-        // Anchor-confirmation moment (D3) draws in world space, above the graph.
+        // Drift edges (I1) + anchor-confirmation moment (D3), in world space.
+        if (this._driftEdges) this._drawDriftEdges();
         if (this._anchorMoment) this._drawAnchorMoment();
 
         ctx.restore();

@@ -33,6 +33,7 @@ const SCRIPTS = [
   'sceneSummary.js',
   'verify.js',
   'provenance.js',
+  'drift.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];
