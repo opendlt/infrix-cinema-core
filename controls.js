@@ -171,6 +171,14 @@
         bar.appendChild(sWrap);
       }
 
+      // Cinematic autoplay (G1) — the headline "watch it explain itself" action.
+      if (this.caps.controls && (this.caps.live || this.caps.replay)) {
+        const story = this.btn('cinema-btn-story', '▶ Play story', 'Play the audit story (cinematic)', () => this.fire('playStory'));
+        story.classList.add('cinema-btn-primary');
+        this._storyBtn = story;
+        bar.appendChild(story);
+      }
+
       bar.appendChild(this.btn('cinema-btn-legend', 'Legend', 'Toggle legend', () => this.fire('toggleLegend')));
       if (this.caps.controls || this.caps.replay) {
         bar.appendChild(this.btn('btn-screenshot', 'Export', 'Export / share', () => this.fire('export')));
@@ -228,6 +236,10 @@
     setLoop(on) {
       this.loop = !!on;
       if (this._loopBtn) { this._loopBtn.classList.toggle('active', this.loop); this._loopBtn.setAttribute('aria-pressed', this.loop ? 'true' : 'false'); }
+    }
+
+    setStoryPlaying(on) {
+      if (this._storyBtn) this._storyBtn.textContent = on ? '⏸ Pause story' : '▶ Play story';
     }
 
     setLayout(engine) {

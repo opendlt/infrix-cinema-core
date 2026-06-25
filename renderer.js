@@ -21,6 +21,9 @@
 
   // A pointer gesture is a click (not a pan) only if it moves less than this (CSS px).
   const DRAG_THRESHOLD = 4;
+  // First-encounter kind hint window (G3): teach the vocabulary in context.
+  const KIND_HINT_MS = 3000;
+  function humanKind(kind) { return String(kind || '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()); }
   function easeInOutRenderer(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
   function rendererReducedMotion() {
     try { return !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches); }
@@ -99,6 +102,10 @@ class CinemaRenderer {
         this._sceneHasSealed = false;
         this._lastSceneChange = 0;
         this.debug = !!(root.__INFRIX_CINEMA_DEBUG__);
+        // First-encounter kind hints (G3).
+        this.showKindHints = true;
+        this._kindFirstSeen = new Map();
+        this._kindHintUntil = 0;
         this._mql = null;
         try {
             if (typeof window !== 'undefined' && window.matchMedia) {
@@ -150,6 +157,17 @@ class CinemaRenderer {
         currentNodeIds.forEach(id => {
             if (!this.nodeEntryTimes.has(id)) this.nodeEntryTimes.set(id, now);
         });
+
+        // First-encounter kind hints (G3): the first time a node-kind appears this
+        // session, schedule a brief in-context label so the vocabulary self-teaches.
+        if (this.showKindHints) {
+            for (const n of nodes) {
+                if (n.kind && !this._kindFirstSeen.has(n.kind)) {
+                    this._kindFirstSeen.set(n.kind, now);
+                    this._kindHintUntil = now + KIND_HINT_MS;
+                }
+            }
+        }
         for (const id of this.nodeEntryTimes.keys()) {
             if (!currentNodeIds.has(id)) this.nodeEntryTimes.delete(id);
         }
@@ -319,7 +337,9 @@ class CinemaRenderer {
     _needsContinuousAnimation() {
         if (this._anchorMoment || this._camRaf) return true;
         if (this.reducedMotion) return false;
-        if ((typeof performance !== 'undefined' ? performance.now() : 0) - (this._lastSceneChange || 0) < 650) return true; // entry animations
+        const tnow = (typeof performance !== 'undefined' ? performance.now() : 0);
+        if (tnow - (this._lastSceneChange || 0) < 650) return true; // entry animations
+        if (tnow < this._kindHintUntil) return true;               // first-encounter hints (G3)
         return !!this._sceneHasAnimatedEdges || !!this._attentionFocus || !!this._sceneHasSealed;
     }
 
@@ -758,6 +778,24 @@ class CinemaRenderer {
                     force: important,
                     minZoom: (important || activity > 2) ? 0 : 0.55,
                 });
+            }
+
+            // First-encounter kind hint (G3): the human kind name above the node,
+            // fading in/out over its window, so the vocabulary teaches itself.
+            if (!isGhost && this.showKindHints && motion && node.kind) {
+                const seenAt = this._kindFirstSeen.get(node.kind);
+                if (seenAt != null) {
+                    const age = now - seenAt;
+                    if (age >= 0 && age < KIND_HINT_MS) {
+                        const a = Math.min(1, age / 160) * Math.min(1, (KIND_HINT_MS - age) / 700);
+                        if (a > 0.02) this._labelCandidates.push({
+                            kind: 'hint', wx: nx, wy: ny, anchorPx: -(radius * this.camera.zoom) - 8,
+                            text: humanKind(node.kind), sub: '',
+                            color: `rgba(140,210,228,${a.toFixed(3)})`, subColor: '',
+                            priority: 5000, force: false, minZoom: 0,
+                        });
+                    }
+                }
             }
         });
     }

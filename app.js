@@ -302,7 +302,55 @@
       let nodes = g ? (Array.isArray(g.nodes) ? g.nodes : Object.values(g.nodes || {})) : [];
       const ev = nodes.find((n) => n.kind === 'evidence' || n.kind === 'evidence_link');
       const an = nodes.find((n) => n.kind === 'anchor' || n.kind === 'l0_bridge');
-      if (ev && an) { renderer.playAnchorConfirmation(ev.id, an.id); pulseLadders('l0'); anchorFired = true; }
+      if (ev && an) { renderer.playAnchorConfirmation(ev.id, an.id); pulseLadders('l0'); bloomAura(); anchorFired = true; }
+    }
+
+    // ---- Wave G: trust-posture aura + chip (G2), scene summary + spotlight (G3) ----
+    const trustAura = el('div', 'cinema-trust-aura');
+    trustAura.id = 'cinema-trust-aura';
+    trustAura.setAttribute('aria-hidden', 'true');
+    stage.appendChild(trustAura);
+
+    const postureChip = document.createElement('button');
+    postureChip.type = 'button';
+    postureChip.className = 'cinema-posture-chip hidden';
+    postureChip.id = 'cinema-posture-chip';
+    postureChip.setAttribute('aria-label', 'Trust posture — open the trust ladder');
+    postureChip.addEventListener('click', () => {
+      const c = sceneCeiling();
+      pulseLadders(c === 'offline' ? 'replay' : c);
+      if (proofPanel && proofPanel.el && proofPanel.el.scrollIntoView) proofPanel.el.scrollIntoView({ block: 'nearest' });
+    });
+    stage.appendChild(postureChip);
+
+    const summaryRibbon = ns.SceneSummaryRibbon ? new ns.SceneSummaryRibbon(stage, { storageKey: 'cinema.summary.' + mode }) : null;
+    const spotlight = ns.Spotlight ? new ns.Spotlight(stage, { storageKey: 'cinema.spotlight.seen' }) : null;
+    let bloomTimer = null;
+
+    function sceneCeiling() {
+      const proof = options.proof || (dataSource && dataSource.proof) || null;
+      if (proof && ns.buildLadder) return ns.buildLadder(proof).ceilingId;
+      let id = 'offline';
+      for (const e of getEvents()) if (rankAsr(e.assurance) > rankAsr(id)) id = e.assurance;
+      return id;
+    }
+    function updateTrustAura() {
+      const c = sceneCeiling();
+      trustAura.dataset.assurance = c;
+      postureChip.dataset.assurance = c;
+      postureChip.textContent = '⛓ ' + asrLabel(c);
+      postureChip.classList.toggle('hidden', nodeCountNow() === 0);
+    }
+    function bloomAura() {
+      trustAura.classList.add('bloom');
+      if (bloomTimer) clearTimeout(bloomTimer);
+      bloomTimer = setTimeout(() => trustAura.classList.remove('bloom'), 820);
+    }
+    function updateSummary() {
+      if (!summaryRibbon || !ns.buildSceneSummary) return;
+      const proof = options.proof || (dataSource && dataSource.proof) || null;
+      const s = ns.buildSceneSummary(renderer.sceneGraph || {}, getEvents(), proof);
+      summaryRibbon.setSummary(s.text);
     }
 
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
@@ -383,12 +431,34 @@
           searchPrev: () => stepMatch(-1),
           toggleLegend: () => legend.toggle(),
           export: () => openExportMenu(exporter, rootEl),
+          playStory: () => { if (cinematic) cinematic.togglePlay(); },
         },
       });
       // Restore a persisted query so a returning operator keeps their filter.
       const q0 = readSearch();
       if (q0) { controls.setSearchValue(q0); runSearch(q0); }
     }
+
+    // ---- Cinematic autoplay (G1) ----
+    const cinematic = ns.Cinematic ? new ns.Cinematic({
+      renderer, timeline, sync, captionHost: stage,
+      getSpeed: () => timeline.state.speed || 1,
+      onAnchor: () => maybeAnchorMoment(Number.MAX_SAFE_INTEGER),
+      onChange: (playing) => { if (controls) controls.setStoryPlaying(playing); },
+    }) : null;
+    // While a story is playing, ← / → step shots and Esc exits (capture phase so
+    // the transport's own arrow handler doesn't also fire).
+    const onCineKey = (e) => {
+      if (!cinematic) return;
+      const active = cinematic.isPlaying() || cinematic.idx >= 0;
+      if (!active) return;
+      const t = e.target;
+      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+      if (e.key === 'Escape') { cinematic.exit(); e.stopPropagation(); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { cinematic.next(); e.stopPropagation(); e.preventDefault(); }
+      else if (e.key === 'ArrowLeft') { cinematic.prev(); e.stopPropagation(); e.preventDefault(); }
+    };
+    document.addEventListener('keydown', onCineKey, true);
 
     // ---- Scene wiring ----
     let unsubscribe = () => {};
@@ -403,6 +473,8 @@
         buildNodeAssurance();
         updateDisclosureChip();
         if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);
+        updateTrustAura();
+        updateSummary();
         refreshTransport();
         refreshOverlay();
         return;
@@ -418,6 +490,12 @@
       buildNodeAssurance();
       updateDisclosureChip();
       if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);
+      updateTrustAura();
+      updateSummary();
+      // Re-arm the cinematic shot list for the new scene (G1); a first-timer gets
+      // the once-ever spotlight (G3).
+      if (cinematic) { cinematic.exit(); cinematic.setShots(getEvents(), renderer.sceneGraph); }
+      if (spotlight && nodeCountNow() > 0) spotlight.maybeShow();
       // A fresh scene re-arms the one-time anchor-confirmation moment (D3); in
       // proof mode (no live scrubbing) play it once on open.
       anchorFired = false;
@@ -461,9 +539,11 @@
       onScene(safe);
     }
 
-    // Initial transport + overlay paint (before any scene arrives).
+    // Initial transport + overlay + trust-aura paint (before any scene arrives).
     refreshTransport();
     refreshOverlay();
+    updateTrustAura();
+    updateSummary();
 
     // Status loop.
     const statusTimer = setInterval(() => updateStatus(renderer, status), 500);
@@ -483,6 +563,11 @@
         if (tooltip) tooltip.destroy();
         if (a11y) a11y.destroy();
         if (agentRibbon) agentRibbon.destroy();
+        if (cinematic) cinematic.destroy();
+        if (summaryRibbon) summaryRibbon.destroy();
+        if (spotlight) spotlight.destroy();
+        if (bloomTimer) clearTimeout(bloomTimer);
+        document.removeEventListener('keydown', onCineKey, true);
         if (sync) sync.destroy();
         if (narrative) narrative.destroy();
         renderer.destroy();

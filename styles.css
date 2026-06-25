@@ -528,6 +528,87 @@
 .cinema-agent-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
 
 /* ============================================================
+ * Wave G — cinematic autoplay (G1), trust aura (G2), self-explaining (G3)
+ * ============================================================ */
+
+/* Primary action button (Play story). */
+.cinema-btn-primary {
+  background: var(--cinema-accent); color: var(--cinema-accent-text);
+  border-color: transparent; font-weight: var(--cinema-fw-bold, 700);
+}
+.cinema-btn-primary:hover { filter: brightness(1.08); background: var(--cinema-accent); }
+
+/* G1 — cinematic lower-third caption. */
+.cinema-caption {
+  position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
+  z-index: 9; max-width: min(720px, 86%); padding: 12px 18px; text-align: center;
+  background: color-mix(in srgb, var(--cinema-panel) 88%, transparent);
+  border: 1px solid var(--cinema-border); border-radius: var(--cinema-radius);
+  box-shadow: var(--cinema-shadow-3); pointer-events: none;
+  animation: cinema-caption-in var(--cinema-dur-base, 240ms) var(--cinema-ease-emphasized, ease);
+}
+.cinema-caption.hidden { display: none; }
+.cinema-caption-headline { font-size: var(--cinema-fs-lg, 16px); font-weight: var(--cinema-fw-black, 800); line-height: 1.3; color: var(--cinema-text); }
+.cinema-caption-proves { margin-top: 4px; font-size: var(--cinema-fs-sm, 12px); color: var(--cinema-accent); }
+@keyframes cinema-caption-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* G2 — trust-posture ambient field (frame-edge aura). */
+.cinema-trust-aura {
+  position: absolute; inset: 0; z-index: 4; pointer-events: none; border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cinema-aura-offline) 50%, transparent),
+              inset 0 0 36px 2px color-mix(in srgb, var(--cinema-aura-offline) 22%, transparent);
+  transition: box-shadow var(--cinema-dur-slow, 420ms) var(--cinema-ease-standard, ease);
+}
+.cinema-trust-aura[data-assurance="replay"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cinema-aura-replay) 55%, transparent), inset 0 0 40px 2px color-mix(in srgb, var(--cinema-aura-replay) 22%, transparent); }
+.cinema-trust-aura[data-assurance="l0"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cinema-aura-l0) 60%, transparent), inset 0 0 44px 3px color-mix(in srgb, var(--cinema-aura-l0) 26%, transparent); }
+.cinema-trust-aura[data-assurance="witness"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cinema-aura-witness) 60%, transparent), inset 0 0 44px 3px color-mix(in srgb, var(--cinema-aura-witness) 26%, transparent); }
+.cinema-trust-aura.bloom { animation: cinema-aura-bloom 820ms var(--cinema-ease-standard, ease) 1; }
+@keyframes cinema-aura-bloom {
+  0% { box-shadow: inset 0 0 0 2px var(--cinema-aura-l0), inset 0 0 10px 2px color-mix(in srgb, var(--cinema-aura-l0) 60%, transparent); }
+  100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cinema-aura-l0) 60%, transparent), inset 0 0 60px 6px color-mix(in srgb, var(--cinema-aura-l0) 30%, transparent); }
+}
+
+/* G2 — posture chip (top-center). */
+.cinema-posture-chip {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 6;
+  padding: 3px 12px; border-radius: 999px; cursor: pointer;
+  font-size: var(--cinema-fs-xs, 11px); font-weight: var(--cinema-fw-bold, 700);
+  background: color-mix(in srgb, var(--cinema-panel) 90%, transparent);
+  border: 1px solid var(--cinema-aura-offline); color: var(--cinema-text);
+}
+.cinema-posture-chip.hidden { display: none; }
+.cinema-posture-chip[data-assurance="replay"] { border-color: var(--cinema-aura-replay); color: var(--cinema-aura-replay); }
+.cinema-posture-chip[data-assurance="l0"] { border-color: var(--cinema-aura-l0); color: var(--cinema-aura-l0); }
+.cinema-posture-chip[data-assurance="witness"] { border-color: var(--cinema-aura-witness); color: var(--cinema-aura-witness); }
+
+/* G3 — self-explaining scene summary ribbon. */
+.cinema-summary-ribbon {
+  position: absolute; top: 40px; left: 10px; z-index: 6; display: flex; align-items: center; gap: 8px;
+  max-width: 70%; padding: 5px 8px 5px 12px; border-radius: 999px;
+  background: color-mix(in srgb, var(--cinema-panel) 92%, transparent);
+  border: 1px solid var(--cinema-border); box-shadow: var(--cinema-shadow-1);
+}
+.cinema-summary-ribbon.hidden { display: none; }
+.cinema-summary-text { font-size: var(--cinema-fs-sm, 12px); color: var(--cinema-text); }
+.cinema-summary-dismiss { background: none; border: none; color: var(--cinema-muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+
+/* G3 — first-run spotlight. */
+.cinema-spotlight { position: absolute; inset: 0; z-index: 11; display: flex; align-items: center; justify-content: center; background: rgba(5, 6, 12, 0.55); }
+.cinema-spotlight-card {
+  max-width: 360px; padding: 22px 24px; text-align: center;
+  background: var(--cinema-panel); border: 1px solid var(--cinema-accent); border-radius: var(--cinema-radius);
+  box-shadow: var(--cinema-shadow-3);
+}
+.cinema-spotlight-title { margin: 0 0 8px; font-size: var(--cinema-fs-lg, 16px); font-weight: var(--cinema-fw-black, 800); }
+.cinema-spotlight-body { margin: 0 0 14px; font-size: var(--cinema-fs-base, 13px); line-height: 1.5; color: var(--cinema-muted); }
+.cinema-spotlight-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 14px; }
+.cinema-spotlight-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cinema-border); }
+.cinema-spotlight-dot.active { background: var(--cinema-accent); }
+.cinema-spotlight-actions { display: flex; gap: 8px; justify-content: center; }
+.cinema-spotlight-skip { background: none; border: 1px solid var(--cinema-border); color: var(--cinema-muted); border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+.cinema-spotlight-next { background: var(--cinema-accent); color: var(--cinema-accent-text); border: none; border-radius: 6px; padding: 6px 16px; font-weight: 600; cursor: pointer; }
+
+/* ============================================================
  * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
  * ============================================================ */
 

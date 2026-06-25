@@ -29,6 +29,8 @@ const SCRIPTS = [
   'tooltip.js',
   'a11y.js',
   'agentRibbon.js',
+  'cinematic.js',
+  'sceneSummary.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];

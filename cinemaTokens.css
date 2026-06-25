@@ -29,6 +29,12 @@
   --cinema-proof-ok: #00c853;
   --cinema-encrypted: #9e9e9e;
 
+  /* trust-posture aura hues (Wave G / G2) — mirror the assurance ladder */
+  --cinema-aura-offline: #6b7088;
+  --cinema-aura-replay: #5cd4e4;
+  --cinema-aura-l0: #ffd700;
+  --cinema-aura-witness: #00c853;
+
   --cinema-radius: 8px;
   --cinema-radius-sm: 6px;
   --cinema-gap: 8px;
