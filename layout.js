@@ -335,6 +335,7 @@
         for (const { n, from, to } of targets) {
           n.position = { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k };
         }
+        if (this.renderer && this.renderer.requestRender) this.renderer.requestRender(); // keep frames flowing under dirty-render (E3)
         if (t < 1) { this._raf = requestAnimationFrame(step); }
         else { this._raf = null; if (this.renderer && this.renderer.fitToView && opts.fit) this.renderer.fitToView(); }
       };

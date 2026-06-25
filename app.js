@@ -62,11 +62,12 @@
     detailsHead.appendChild(detailTitle); detailsHead.appendChild(detailClose);
     const detailContent = el('div'); detailContent.id = 'detail-content';
     detailsPanelEl.appendChild(detailsHead); detailsPanelEl.appendChild(detailContent);
-    stage.appendChild(detailsPanelEl);
 
-    // Body holds the canvas stage and, in split/narrative view, the audit story.
+    // Body holds the canvas stage, the docked details panel (F3), and — in
+    // split/narrative view — the audit story.
     const body = el('div', 'cinema-body');
     body.appendChild(stage);
+    body.appendChild(detailsPanelEl);
     rootEl.appendChild(body);
 
     // Controls bar (skipped entirely in embed mode).
@@ -79,7 +80,6 @@
     status.append(
       span('status-block', 'Block: 0'), span('status-gas', 'Gas: 0'),
       span('status-nodes', 'Nodes: 0'), span('status-edges', 'Edges: 0'),
-      span('status-fps', 'FPS: 0'),
     );
     if (!caps.readOnly) rootEl.appendChild(status);
 
@@ -617,23 +617,52 @@
   }
 
   function openExportMenu(exporter, rootEl) {
-    // Minimal, dependency-free chooser. Each option is self-describing.
+    // Self-describing chooser (F2): every option says what it is and who it's for,
+    // grouped into "share a view" vs "share proof". Dismisses on outside-click/Esc.
     const existing = rootEl.querySelector('.cinema-export-menu');
     if (existing) { existing.remove(); return; }
     const menu = el('div', 'cinema-export-menu');
-    const items = [
-      ['PNG', () => exporter.screenshot()],
-      ['SVG', () => exporter.exportSVG()],
-      ['JSON', () => exporter.exportJSON()],
-      ['Replay ref', () => exporter.replayRef()],
-      ['Proof report', () => exporter.proofReport()],
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Export and share');
+
+    const groups = [
+      ['Share a view', [
+        ['PNG image', 'A picture of the current frame.', () => exporter.screenshot()],
+        ['SVG vector', 'A scalable vector of the scene.', () => exporter.exportSVG()],
+        ['Scene JSON', 'The scene graph, with a provenance header.', () => exporter.exportJSON()],
+        ['Replay reference', 'A pointer that re-opens this exact position.', () => exporter.replayRef()],
+      ]],
+      ['Share proof', [
+        ['Proof report', 'The full provenance envelope for an auditor.', () => exporter.proofReport()],
+      ]],
     ];
-    for (const [label, fn] of items) {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'cinema-export-item'; b.textContent = label;
-      b.addEventListener('click', () => { fn(); menu.remove(); });
-      menu.appendChild(b);
+    for (const [heading, items] of groups) {
+      const h = el('div', 'cinema-export-group'); h.textContent = heading; menu.appendChild(h);
+      for (const [label, desc, fn] of items) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'cinema-export-item'; b.setAttribute('role', 'menuitem');
+        const t = el('span', 'cinema-export-item-label'); t.textContent = label;
+        const d = el('span', 'cinema-export-item-desc'); d.textContent = desc;
+        b.appendChild(t); b.appendChild(d);
+        b.addEventListener('click', () => { try { fn(); } catch (e) {} close(); });
+        menu.appendChild(b);
+      }
     }
+
+    function close() {
+      menu.remove();
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onOutside, true);
+    }
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    function onOutside(e) { if (!menu.contains(e.target)) close(); }
+    document.addEventListener('keydown', onKey, true);
+    // Defer so the click that opened the menu doesn't immediately close it.
+    setTimeout(() => document.addEventListener('pointerdown', onOutside, true), 0);
+
     rootEl.appendChild(menu);
+    const first = menu.querySelector('.cinema-export-item');
+    if (first && first.focus) first.focus();
   }
 
   function updateStatus(renderer, status) {
@@ -642,7 +671,6 @@
     const g = renderer.sceneGraph;
     setText(status, 'status-nodes', `Nodes: ${s.nodes}`);
     setText(status, 'status-edges', `Edges: ${s.edges}`);
-    setText(status, 'status-fps', `FPS: ${s.fps}`);
     if (g) {
       setText(status, 'status-block', `Block: ${g.blockHeight || 0}`);
       setText(status, 'status-gas', `Gas: ${(g.totalGasUsed || 0).toLocaleString()}`);

@@ -87,6 +87,18 @@ class CinemaRenderer {
         // Motion hierarchy (D2): reduced-motion flag + the single attention node.
         this.reducedMotion = rendererReducedMotion();
         this._attentionFocus = null;
+
+        // Performance (E): dirty-flag rendering + precomputed aggregation + a
+        // spatial grid for hit-testing. Debug HUD is opt-in only (F1).
+        this._dirty = true;
+        this._agg = null;
+        this._viewRect = null;
+        this._hitGrid = new Map();
+        this._hitCell = 80;
+        this._sceneHasAnimatedEdges = false;
+        this._sceneHasSealed = false;
+        this._lastSceneChange = 0;
+        this.debug = !!(root.__INFRIX_CINEMA_DEBUG__);
         this._mql = null;
         try {
             if (typeof window !== 'undefined' && window.matchMedia) {
@@ -125,7 +137,7 @@ class CinemaRenderer {
 
     /** setLayoutLanes stores spine-lane metadata (from layout.js) to draw behind
      *  the graph; null clears it. */
-    setLayoutLanes(lanes) { this._lanes = (lanes && lanes.length) ? lanes : null; }
+    setLayoutLanes(lanes) { this._lanes = (lanes && lanes.length) ? lanes : null; this._dirty = true; }
 
     setSceneGraph(graph) {
         const isFirst = !this.sceneGraph;
@@ -158,6 +170,7 @@ class CinemaRenderer {
 
         this.sceneGraph = graph;
         this._computeAttention();
+        this._refreshAggregate();
         if (isFirst) this.fitToView();
         this.requestRender();
     }
@@ -168,6 +181,53 @@ class CinemaRenderer {
         if (!nodes) { this._attentionFocus = null; return; }
         if (!Array.isArray(nodes)) nodes = Object.values(nodes);
         this._attentionFocus = computeAttention(nodes);
+    }
+
+    // _aggregate groups parallel edges into per-pair traffic, computes per-node
+    // activity, and flags animated/sealed presence — once per scene change (E4)
+    // rather than every frame.
+    _aggregate(nodes, edges) {
+        if (!Array.isArray(nodes)) nodes = nodes ? Object.values(nodes) : [];
+        if (!Array.isArray(edges)) edges = edges ? Object.values(edges) : [];
+        const nodeMap = new Map();
+        nodes.forEach(n => nodeMap.set(n.id, n));
+        const edgeTraffic = {};
+        let hasAnimatedEdges = false;
+        edges.forEach(edge => {
+            const key = (edge.fromNodeId || '') + '→' + (edge.toNodeId || '');
+            let t = edgeTraffic[key];
+            if (!t) t = edgeTraffic[key] = { count: 0, totalGas: 0, label: '', animated: false, color: null, fromId: edge.fromNodeId, toId: edge.toNodeId };
+            t.count++;
+            t.totalGas += (edge.gasCost || 0);
+            t.label = edge.label || edge.function || t.label;
+            if (edge.animated) { t.animated = true; hasAnimatedEdges = true; }
+            if (edge.color) t.color = edge.color;
+        });
+        const nodeActivity = {};
+        Object.values(edgeTraffic).forEach(t => {
+            nodeActivity[t.toId] = (nodeActivity[t.toId] || 0) + t.count;
+            nodeActivity[t.fromId] = (nodeActivity[t.fromId] || 0) + t.count;
+        });
+        let hasSealed = false;
+        for (const n of nodes) { if (n.redacted || n.zkIndicator) { hasSealed = true; break; } }
+        return { nodeMap, edgeTraffic, nodeActivity, hasAnimatedEdges, hasSealed };
+    }
+
+    _refreshAggregate() {
+        if (!this.sceneGraph) { this._agg = null; return; }
+        this._agg = this._aggregate(this.sceneGraph.nodes || this.sceneGraph.Nodes, this.sceneGraph.edges || this.sceneGraph.Edges);
+        this._edgeTraffic = this._agg.edgeTraffic;
+        this._nodeActivity = this._agg.nodeActivity;
+        this._nodeMap = this._agg.nodeMap;
+        this._sceneHasAnimatedEdges = this._agg.hasAnimatedEdges;
+        this._sceneHasSealed = this._agg.hasSealed;
+        this._lastSceneChange = (typeof performance !== 'undefined' ? performance.now() : 0);
+    }
+
+    _inView(pos, pad) {
+        const r = this._viewRect;
+        if (!r || !pos) return true;
+        return pos.x >= r.x0 - pad && pos.x <= r.x1 + pad && pos.y >= r.y0 - pad && pos.y <= r.y1 + pad;
     }
 
     fitToView() {
@@ -197,6 +257,7 @@ class CinemaRenderer {
         const cy = (minY + maxY) / 2;
         this.camera.x = -cx * this.camera.zoom;
         this.camera.y = -cy * this.camera.zoom;
+        this._dirty = true;
     }
 
     applyUpdate(update) {
@@ -231,6 +292,7 @@ class CinemaRenderer {
         removedEdges.forEach(id => { delete this.sceneGraph.edges[id]; });
 
         this._computeAttention();
+        this._refreshAggregate();
         this.requestRender();
     }
 
@@ -249,33 +311,55 @@ class CinemaRenderer {
         this.requestRender();
     }
 
-    requestRender() {
-        // Rendering happens in the animation loop
+    requestRender() { this._dirty = true; }
+
+    // _needsContinuousAnimation: is anything actually moving this frame? When
+    // false AND not dirty, render() skips entirely so an idle scene costs ~0 CPU
+    // (E3). Reduced-motion makes idle truly idle.
+    _needsContinuousAnimation() {
+        if (this._anchorMoment || this._camRaf) return true;
+        if (this.reducedMotion) return false;
+        if ((typeof performance !== 'undefined' ? performance.now() : 0) - (this._lastSceneChange || 0) < 650) return true; // entry animations
+        return !!this._sceneHasAnimatedEdges || !!this._attentionFocus || !!this._sceneHasSealed;
     }
 
     startAnimationLoop() {
         const loop = () => {
             this.render();
-            this.particlePhase += 0.02;
-            this.frameCount++;
-            const now = performance.now();
-            if (now - this.lastFPSTime > 1000) {
-                this.fps = Math.round(this.frameCount * 1000 / (now - this.lastFPSTime));
-                this.frameCount = 0;
-                this.lastFPSTime = now;
-            }
             this.animationFrame = requestAnimationFrame(loop);
         };
         loop();
     }
 
     render() {
+        // Dirty-flag rendering (E3): skip the whole frame when nothing changed
+        // and nothing is animating.
+        if (!this._dirty && !this._needsContinuousAnimation()) return;
+        this._dirty = false;
+        this.particlePhase += 0.02;
+        this.frameCount++;
+        {
+            const t = performance.now();
+            if (t - this.lastFPSTime > 1000) {
+                this.fps = Math.round(this.frameCount * 1000 / (t - this.lastFPSTime));
+                this.frameCount = 0;
+                this.lastFPSTime = t;
+            }
+        }
+
         const { ctx, camera } = this;
         const w = this.cssWidth, h = this.cssHeight;
         // Establish a CSS-pixel coordinate space scaled by dpr so everything is
         // crisp on HiDPI displays (A3); all math below is in logical pixels.
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
+
+        // Visible world rect for viewport culling (E1).
+        const z = camera.zoom || 1;
+        this._viewRect = {
+            x0: (-w / 2 - camera.x) / z, x1: (w / 2 - camera.x) / z,
+            y0: (-h / 2 - camera.y) / z, y1: (h / 2 - camera.y) / z,
+        };
 
         // Background gradient + subtle vignette for depth.
         const grad = ctx.createLinearGradient(0, 0, 0, h);
@@ -316,7 +400,7 @@ class CinemaRenderer {
 
         // Labels are drawn last, in screen space, with collision avoidance (A5).
         this.drawLabels();
-        this.drawHUD();
+        if (this.debug) this.drawHUD(); // dev-only FPS HUD (F1)
     }
 
     // _drawBackdrop adds spatial depth (D1): a faint dot-field that drifts with
@@ -372,23 +456,12 @@ class CinemaRenderer {
         if (!Array.isArray(nodes)) nodes = Object.values(nodes);
         if (!Array.isArray(edges)) edges = Object.values(edges);
 
-        // Index nodes by ID for edge lookup
-        const nodeMap = new Map();
-        nodes.forEach(n => nodeMap.set(n.id, n));
-
-        // Aggregate edges between same node pairs for traffic visualization
-        const edgeTraffic = {};  // "from→to" → { count, totalGas, latestLabel, animated, color }
-        edges.forEach(edge => {
-            const key = (edge.fromNodeId || '') + '→' + (edge.toNodeId || '');
-            if (!edgeTraffic[key]) {
-                edgeTraffic[key] = { count: 0, totalGas: 0, label: '', animated: false, color: null, fromId: edge.fromNodeId, toId: edge.toNodeId };
-            }
-            edgeTraffic[key].count++;
-            edgeTraffic[key].totalGas += (edge.gasCost || 0);
-            edgeTraffic[key].label = edge.label || edge.function || edgeTraffic[key].label;
-            if (edge.animated) edgeTraffic[key].animated = true;
-            if (edge.color) edgeTraffic[key].color = edge.color;
-        });
+        // Use the precomputed aggregation for the main scene (E4); the ghost
+        // overlay (rare) computes inline.
+        const agg = isGhost ? this._aggregate(nodes, edges) : (this._agg || (this._agg = this._aggregate(nodes, edges)));
+        const nodeMap = agg.nodeMap;
+        const edgeTraffic = agg.edgeTraffic;
+        const vr = this._viewRect;
 
         // Draw aggregated edges -- one line per pair, thickness = traffic volume
         const now_e = performance.now();
@@ -397,6 +470,13 @@ class CinemaRenderer {
             const to = nodeMap.get(traffic.toId);
             if (!from || !to) return;
             if (!from.position || !to.position) return;
+
+            // Viewport culling (E1): skip edges whose bounding box is off-screen.
+            if (vr) {
+                const exMin = Math.min(from.position.x, to.position.x), exMax = Math.max(from.position.x, to.position.x);
+                const eyMin = Math.min(from.position.y, to.position.y), eyMax = Math.max(from.position.y, to.position.y);
+                if (exMax < vr.x0 - 30 || exMin > vr.x1 + 30 || eyMax < vr.y0 - 30 || eyMin > vr.y1 + 30) return;
+            }
 
             // Edge entry animation (300ms grow from source to target)
             const edgeKey = (traffic.fromId || '') + '→' + (traffic.toId || '');
@@ -464,24 +544,17 @@ class CinemaRenderer {
             }
         });
 
-        // Count incoming edges per node for activity-based sizing
-        const nodeActivity = {};
-        Object.values(edgeTraffic).forEach(t => {
-            nodeActivity[t.toId] = (nodeActivity[t.toId] || 0) + t.count;
-            nodeActivity[t.fromId] = (nodeActivity[t.fromId] || 0) + t.count;
-        });
-
-        // Store computed data for hit testing and details panel
-        if (!isGhost) {
-            this._edgeTraffic = edgeTraffic;
-            this._nodeActivity = nodeActivity;
-            this._nodeMap = nodeMap;
-        }
+        const nodeActivity = agg.nodeActivity;
+        // Rebuild the spatial hit-grid for the main scene this frame (E1).
+        if (!isGhost) { this._hitGrid = new Map(); this._edgeTraffic = edgeTraffic; this._nodeActivity = nodeActivity; this._nodeMap = nodeMap; }
 
         // Draw nodes
         const now = performance.now();
-        nodes.forEach(node => {
+        const cell = this._hitCell;
+        nodes.forEach((node, nodeIdx) => {
             if (!node.position) return;
+            // Viewport culling (E1): skip nodes whose disc is off-screen.
+            if (vr && !this._inView(node.position, (node.size || 10) + 50)) return;
             const activity = nodeActivity[node.id] || 0;
 
             // Entry animation (500ms scale-up + fade-in)
@@ -512,6 +585,14 @@ class CinemaRenderer {
             // legible quarantine indicator; the shake is gone.
             const nx = node.position.x;
             const ny = node.position.y;
+
+            // Insert into the spatial hit-grid (E1) — main scene only.
+            if (!isGhost) {
+                const key = Math.floor(nx / cell) + ',' + Math.floor(ny / cell);
+                let bucket = this._hitGrid.get(key);
+                if (!bucket) this._hitGrid.set(key, (bucket = []));
+                bucket.push({ id: node.id, x: nx, y: ny, r: radius, idx: nodeIdx });
+            }
 
             // Anomaly glow — pulses ONLY when this is the attention focus; other
             // anomalous nodes get a calm static glow that is still clearly red.
@@ -825,6 +906,7 @@ class CinemaRenderer {
                     this.camera.y += cur.midY - this._pinchPrev.midY;
                 }
                 this._pinchPrev = cur;
+                this._dirty = true;
                 return;
             }
 
@@ -836,6 +918,7 @@ class CinemaRenderer {
                     this.camera.x += e.clientX - g.lastX;
                     this.camera.y += e.clientY - g.lastY;
                     g.lastX = e.clientX; g.lastY = e.clientY;
+                    this._dirty = true;
                 }
                 return;
             }
@@ -886,13 +969,17 @@ class CinemaRenderer {
         this.camera.zoom = z;
         this.camera.x = sx - this.cssWidth / 2 - wx * z;
         this.camera.y = sy - this.cssHeight / 2 - wy * z;
+        this._dirty = true;
     }
 
     _hover(clientX, clientY) {
+        const prevNode = this.hoveredNode, prevEdge = this.hoveredEdge;
+        const markIfChanged = () => { if (this.hoveredNode !== prevNode || this.hoveredEdge !== prevEdge) this._dirty = true; };
         const node = this.hitTestNode(clientX, clientY);
         if (node) {
             this.hoveredEdge = null;
             this.hoveredNode = node.id;
+            markIfChanged();
             this.canvas.style.cursor = 'pointer';
             const s = this._worldToClient(node.position);
             this.emit('nodeHovered', { node, x: s.x, y: s.y });
@@ -902,16 +989,19 @@ class CinemaRenderer {
         const edge = this.hitTestEdge(clientX, clientY);
         if (edge) {
             this.hoveredEdge = edge;
+            markIfChanged();
             this.canvas.style.cursor = 'pointer';
             this.emit('edgeHovered', { edge, x: clientX, y: clientY });
         } else {
             if (this.hoveredEdge) { this.hoveredEdge = null; }
+            markIfChanged();
             this.canvas.style.cursor = 'grab';
             this.emit('hoverEnd');
         }
     }
 
     _click(clientX, clientY, coarse) {
+        this._dirty = true;
         const node = this.hitTestNode(clientX, clientY, { coarse });
         if (node) { this.selectedNode = node.id; this.emit('nodeSelected', node); return; }
         const edge = this.hitTestEdge(clientX, clientY);
@@ -972,6 +1062,7 @@ class CinemaRenderer {
         if (rendererReducedMotion()) return;
         if (!this._findNode(evidenceId) || !this._findNode(anchorId)) return;
         this._anchorMoment = { evId: evidenceId, anId: anchorId, start: performance.now() };
+        this._dirty = true;
     }
 
     _drawAnchorMoment() {
@@ -1005,6 +1096,7 @@ class CinemaRenderer {
 
     setKeyboardFocus(id) {
         this._focusedNode = id || null;
+        this._dirty = true;
         if (id) { const n = this._findNode(id); if (n && n.position) this.flyTo(n, { zoom: Math.max(this.camera.zoom, 1.2), duration: 260 }); }
     }
 
@@ -1018,13 +1110,16 @@ class CinemaRenderer {
             this.camera.x = from.x + (to.x - from.x) * k;
             this.camera.y = from.y + (to.y - from.y) * k;
             this.camera.zoom = from.zoom + (to.zoom - from.zoom) * k;
+            this._dirty = true;
             this._camRaf = k < 1 ? requestAnimationFrame(step) : null;
         };
         this._camRaf = requestAnimationFrame(step);
     }
 
-    // hitTestNode tests against the CACHED RENDERED radius (B3) — the visible
-    // disc, not size+5 — and returns the top-most node (reverse draw order).
+    // hitTestNode tests against the CACHED RENDERED radius (B3) using the spatial
+    // grid (E1) — O(1) amortized instead of a linear scan — and returns the
+    // top-most node (greatest draw index). Falls back to a linear scan before the
+    // first frame populates the grid.
     hitTestNode(clientX, clientY, opts) {
         if (!this.sceneGraph || !this.sceneGraph.nodes) return null;
         const rect = this.canvas.getBoundingClientRect();
@@ -1032,6 +1127,24 @@ class CinemaRenderer {
         const cy = (clientY - rect.top - this.cssHeight / 2 - this.camera.y) / this.camera.zoom;
         const pad = (opts && opts.coarse) ? 9 : 2;
 
+        if (this._hitGrid && this._hitGrid.size) {
+            const cell = this._hitCell;
+            const cxN = Math.floor(cx / cell), cyN = Math.floor(cy / cell);
+            let best = null, bestIdx = -1;
+            for (let gx = -1; gx <= 1; gx++) {
+                for (let gy = -1; gy <= 1; gy++) {
+                    const bucket = this._hitGrid.get((cxN + gx) + ',' + (cyN + gy));
+                    if (!bucket) continue;
+                    for (const e of bucket) {
+                        const dx = cx - e.x, dy = cy - e.y, r = e.r + pad;
+                        if (dx * dx + dy * dy <= r * r && e.idx > bestIdx) { bestIdx = e.idx; best = e; }
+                    }
+                }
+            }
+            return best ? this._findNode(best.id) : null;
+        }
+
+        // Fallback: linear scan, top-most first.
         let nodes = this.sceneGraph.nodes;
         if (!Array.isArray(nodes)) nodes = Object.values(nodes);
         for (let i = nodes.length - 1; i >= 0; i--) {
@@ -1092,6 +1205,15 @@ class CinemaRenderer {
     on(event, callback) {
         if (!this.eventHandlers.has(event)) this.eventHandlers.set(event, []);
         this.eventHandlers.get(event).push(callback);
+    }
+
+    // off removes a handler — lets consumers (e.g. narrativeSync) unsubscribe on
+    // destroy instead of leaking across remounts (E2).
+    off(event, callback) {
+        const a = this.eventHandlers.get(event);
+        if (!a) return;
+        const i = a.indexOf(callback);
+        if (i >= 0) a.splice(i, 1);
     }
 
     emit(event, data) {
