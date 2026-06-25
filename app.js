@@ -603,6 +603,47 @@
     function persistLens(role) { if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.lens', role || ''); } catch (_) {} } }
     function readLens() { try { return localStorage.getItem('cinema.lens') || ''; } catch (_) { return ''; } }
 
+    // ---- Wave L: shareable moment links (L1) ----
+    function numL(v, d) { const n = Number(v); return isFinite(n) ? n : (d || 0); }
+    function buildMoment() {
+      return {
+        mode,
+        position: (timeline && timeline.state) ? (timeline.state.currentSeq || 0) : 0,
+        camera: { x: renderer.camera.x, y: renderer.camera.y, zoom: renderer.camera.zoom },
+        view: viewMode,
+        lens: activeLens || '',
+        query: currentQuery || '',
+      };
+    }
+    function baseUrl() {
+      if (options.baseUrl) return options.baseUrl;
+      try { if (typeof location !== 'undefined' && location.href) return location.href.split('#')[0]; } catch (_) {}
+      return '';
+    }
+    function applyMoment(m) {
+      if (!m) return;
+      if (m.view) ctrlSetView(m.view);
+      if (m.lens) { activeLens = m.lens; activeChip = null; if (controls) { controls.setLens(m.lens); controls.setSmartActive(null); } }
+      // Always set the query to the moment's value — an empty query clears any
+      // stale/persisted one so it can't steal the dim channel from the lens.
+      currentQuery = m.query || '';
+      if (controls) controls.setSearchValue(currentQuery);
+      reapplyDim();
+      if (m.camera && renderer.camera) { renderer.camera.x = numL(m.camera.x); renderer.camera.y = numL(m.camera.y); renderer.camera.zoom = numL(m.camera.zoom, 1) || 1; renderer._dirty = true; }
+      if (typeof m.position === 'number' && timeline && timeline.seek) timeline.seek(m.position);
+    }
+    function copyText(text) {
+      try { if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text); return true; } } catch (_) {}
+      try { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); if (ta.select) ta.select(); if (document.execCommand) document.execCommand('copy'); ta.remove(); return true; } catch (_) {}
+      return false;
+    }
+    const toastEl = el('div', 'cinema-toast hidden'); toastEl.id = 'cinema-toast'; stage.appendChild(toastEl);
+    let toastTimer = null;
+    function toast(msg) { toastEl.textContent = msg; toastEl.classList.remove('hidden'); if (toastTimer) clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 1800); }
+    function copyMomentLink() { const url = ns.momentToUrl ? ns.momentToUrl(baseUrl(), buildMoment()) : ''; if (url) { copyText(url); toast('Link to this moment copied'); } return url; }
+    function copyEmbedSnippet() { const s = ns.embedSnippet ? ns.embedSnippet(baseUrl(), buildMoment()) : ''; if (s) { copyText(s); toast('Embed snippet copied'); } return s; }
+    let pendingMoment = (ns.momentFromLocation ? ns.momentFromLocation(typeof location !== 'undefined' ? location.hash : '') : null) || options.moment || null;
+
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
       if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
@@ -681,7 +722,7 @@
           searchNext: () => stepMatch(1),
           searchPrev: () => stepMatch(-1),
           toggleLegend: () => legend.toggle(),
-          export: () => openExportMenu(exporter, rootEl),
+          export: () => openExportMenu(exporter, rootEl, { copyLink: copyMomentLink, copyEmbed: copyEmbedSnippet }),
           playStory: () => { if (cinematic) cinematic.togglePlay(); },
           verify: () => openVerifyTheatre(),
           toggleDrift: () => toggleDrift(),
@@ -778,6 +819,8 @@
       if (mode === 'cinema.proof') maybeAnchorMoment(Number.MAX_SAFE_INTEGER);
       refreshTransport();
       refreshOverlay();
+      // Restore a shared moment once the first scene exists (L1).
+      if (pendingMoment) { applyMoment(pendingMoment); pendingMoment = null; }
     }
 
     function bind(ds) {
@@ -829,6 +872,10 @@
       mode, caps, renderer, get dataSource() { return dataSource; }, timeline, controls, legend, exporter, details, proofPanel,
       narrative, sync, get viewMode() { return viewMode; },
       setViewMode(m) { viewMode = m; applyViewMode(rootEl, m); persistViewMode(mode, m); },
+      // Wave L — share/restore a framed moment (view state only, no scene data).
+      getMoment: buildMoment,
+      getMomentUrl() { return ns.momentToUrl ? ns.momentToUrl(baseUrl(), buildMoment()) : ''; },
+      applyMoment,
       setScene: onScene,
       destroy() {
         try { unsubscribe(); } catch (e) {}
@@ -848,6 +895,7 @@
         if (projectionView) projectionView.destroy();
         if (tlInstrument) tlInstrument.destroy();
         if (vitalsStrip) vitalsStrip.destroy();
+        if (toastTimer) clearTimeout(toastTimer);
         if (bloomTimer) clearTimeout(bloomTimer);
         document.removeEventListener('keydown', onCineKey, true);
         if (sync) sync.destroy();
@@ -983,7 +1031,7 @@
     });
   }
 
-  function openExportMenu(exporter, rootEl) {
+  function openExportMenu(exporter, rootEl, share) {
     // Self-describing chooser (F2): every option says what it is and who it's for,
     // grouped into "share a view" vs "share proof". Dismisses on outside-click/Esc.
     const existing = rootEl.querySelector('.cinema-export-menu');
@@ -992,7 +1040,14 @@
     menu.setAttribute('role', 'menu');
     menu.setAttribute('aria-label', 'Export and share');
 
-    const groups = [
+    const groups = [];
+    if (share) {
+      groups.push(['Share a link', [
+        ['Copy link to this moment', 'A URL that reopens this exact framed moment (no scene data).', () => share.copyLink && share.copyLink()],
+        ['Copy embed snippet', 'An <iframe> embedding this moment with a live trust ladder.', () => share.copyEmbed && share.copyEmbed()],
+      ]]);
+    }
+    groups.push(
       ['Share a view', [
         ['PNG image', 'A picture of the current frame.', () => exporter.screenshot()],
         ['SVG vector', 'A scalable vector of the scene.', () => exporter.exportSVG()],
@@ -1002,7 +1057,7 @@
       ['Share proof', [
         ['Proof report', 'The full provenance envelope for an auditor.', () => exporter.proofReport()],
       ]],
-    ];
+    );
     for (const [heading, items] of groups) {
       const h = el('div', 'cinema-export-group'); h.textContent = heading; menu.appendChild(h);
       for (const [label, desc, fn] of items) {

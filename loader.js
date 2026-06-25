@@ -41,6 +41,7 @@ const SCRIPTS = [
   'projections.js',
   'lens.js',
   'smartFilters.js',
+  'momentLink.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];

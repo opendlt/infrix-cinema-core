@@ -768,6 +768,17 @@ button.cinema-vital:hover { border-color: var(--cinema-border); }
 .cinema-smart-chip.active { background: var(--cinema-accent); color: var(--cinema-accent-text); border-color: transparent; }
 
 /* ============================================================
+ * Wave L — shareable moment links (L1): copied-toast
+ * ============================================================ */
+.cinema-toast {
+  position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); z-index: 13;
+  padding: 7px 14px; border-radius: 999px; font-size: var(--cinema-fs-sm, 12px); font-weight: 600;
+  background: var(--cinema-proof-ok, #00c853); color: #04210f; box-shadow: var(--cinema-shadow-2);
+  pointer-events: none;
+}
+.cinema-toast.hidden { display: none; }
+
+/* ============================================================
  * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
  * ============================================================ */
 
