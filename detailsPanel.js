@@ -21,8 +21,13 @@
 
     showNode(node) {
       if (!node) return;
+      this._lastNode = node;
       const stats = this.renderer ? this.renderer.getNodeStats(node.id) : { activity: 0, inbound: 0, outbound: 0, totalGas: 0 };
       const rows = [];
+      // Trace / Why? action (H2) — one click lights the causal chain.
+      if (typeof this.onTrace === 'function') {
+        rows.push(traceAction(() => this.onTrace(node.id)));
+      }
       rows.push(section('Identity', [
         ['Type', kindLabel(node.kind)],
         ['URL', node.url || '—'],
@@ -83,7 +88,43 @@
       this.contentEl.replaceChildren(...(Array.isArray(sections) ? sections : [sections]));
       this.show();
     }
+
+    /** appendProvenance adds the lit causal chain (H2) under the current node. */
+    appendProvenance(hops) {
+      if (!this.contentEl) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'cinema-detail-section';
+      const h = document.createElement('h4'); h.textContent = 'Causal chain'; wrap.appendChild(h);
+      if (!hops || !hops.length) {
+        wrap.appendChild(noteEl2('No causal links from this node.'));
+      } else {
+        for (const hop of hops) {
+          const row = document.createElement('div');
+          row.className = 'cinema-detail-row cinema-provenance-hop';
+          const k = document.createElement('span'); k.className = 'cinema-detail-key';
+          k.textContent = kindLabel(hop.edgeKind) + ':';
+          const v = document.createElement('span'); v.className = 'cinema-detail-val';
+          v.textContent = hop.fromId + ' → ' + hop.toId + (hop.proofRef ? ' · ' + hop.proofRef : '');
+          row.appendChild(k); row.appendChild(v);
+          wrap.appendChild(row);
+        }
+      }
+      this.contentEl.appendChild(wrap);
+      this.show();
+    }
   }
+
+  function traceAction(onClick) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cinema-detail-actions';
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'cinema-trace-btn'; b.textContent = '🔍 Trace / Why?';
+    b.setAttribute('aria-label', 'Trace the causal chain that produced this');
+    b.addEventListener('click', onClick);
+    wrap.appendChild(b);
+    return wrap;
+  }
+  function noteEl2(text) { const p = document.createElement('p'); p.className = 'cinema-detail-note'; p.textContent = text; return p; }
 
   function section(title, pairs) {
     const wrap = document.createElement('div');

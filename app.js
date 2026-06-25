@@ -90,6 +90,7 @@
     const details = new ns.DetailsPanel(detailsPanelEl, detailContent, detailClose);
     details.renderer = renderer;
     details.assuranceProvider = (id) => nodeAssurance[id] || null;
+    details.onTrace = (id) => doTrace(id); // H2 — Trace / Why?
 
     // Hover tooltip (B1) + accessible node list (B5).
     const tooltip = ns.CinemaTooltip ? new ns.CinemaTooltip(stage) : null;
@@ -101,7 +102,7 @@
     // click clears. Edge hover no longer throws open the heavy panel.
     renderer.on('nodeSelected', (n) => { details.showNode(n); if (tooltip) tooltip.hide(); if (a11y) a11y.focusNode(n.id); });
     renderer.on('edgeSelected', (t) => { details.showTraffic(t); if (tooltip) tooltip.hide(); });
-    renderer.on('backgroundClicked', () => { details.hide(); renderer.setKeyboardFocus(null); });
+    renderer.on('backgroundClicked', () => { details.hide(); renderer.setKeyboardFocus(null); clearTrace(); });
     renderer.on('nodeHovered', (p) => { if (tooltip) tooltip.showNode(p.node, p.x, p.y, { stats: renderer.getNodeStats ? renderer.getNodeStats(p.node.id) : null, assurance: nodeAssurance[p.node.id] || null }); });
     renderer.on('edgeHovered', (p) => { if (tooltip) tooltip.showEdge(p.edge, p.x, p.y); });
     renderer.on('hoverEnd', () => { if (tooltip) tooltip.hide(); });
@@ -353,6 +354,33 @@
       summaryRibbon.setSummary(s.text);
     }
 
+    // ---- Wave H: verify theatre (H1) + causal trace (H2) ----
+    let verifyTheatre = null;
+    function openVerifyTheatre() {
+      if (!ns.VerifyTheatre) return;
+      if (verifyTheatre) { verifyTheatre.close(); verifyTheatre = null; }
+      const proof = options.proof || (dataSource && dataSource.proof) || {};
+      verifyTheatre = new ns.VerifyTheatre(stage, {
+        proof,
+        verifier: options.verifier,
+        onRungPass: (rung) => { pulseLadders(rung); if (rung === 'l0') bloomAura(); },
+        onClose: () => { verifyTheatre = null; },
+      });
+      verifyTheatre.run();
+    }
+    function doTrace(id) {
+      if (!ns.traceCausalChain) return;
+      const chain = ns.traceCausalChain(renderer.sceneGraph, id);
+      const node = renderer._findNode ? renderer._findNode(id) : null;
+      if (sync && sync.highlightNodes && chain.nodes.length) sync.highlightNodes(chain.nodes);
+      if (renderer.setTracePath) renderer.setTracePath(ns.edgeKeysOf(chain));
+      if (node) { details.showNode(node); details.appendProvenance(chain.hops); }
+    }
+    function clearTrace() {
+      if (renderer.clearTracePath) renderer.clearTracePath();
+      if (sync && sync.clearHighlight) sync.clearHighlight();
+    }
+
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
       if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
@@ -413,6 +441,7 @@
       controls = new ns.CinemaControls(controlsHost, {
         capabilities: caps,
         initialLayout: layoutEngine,
+        canVerify: !!(options.proof || caps.proof || (dataSource && dataSource.proof)),
         handlers: {
           togglePlay: () => { timeline.togglePlay(); controls.setPlaying(timeline.state.playing); },
           stepForward: () => timeline.stepForward(),
@@ -432,6 +461,7 @@
           toggleLegend: () => legend.toggle(),
           export: () => openExportMenu(exporter, rootEl),
           playStory: () => { if (cinematic) cinematic.togglePlay(); },
+          verify: () => openVerifyTheatre(),
         },
       });
       // Restore a persisted query so a returning operator keeps their filter.
@@ -566,6 +596,7 @@
         if (cinematic) cinematic.destroy();
         if (summaryRibbon) summaryRibbon.destroy();
         if (spotlight) spotlight.destroy();
+        if (verifyTheatre) verifyTheatre.destroy();
         if (bloomTimer) clearTimeout(bloomTimer);
         document.removeEventListener('keydown', onCineKey, true);
         if (sync) sync.destroy();

@@ -609,6 +609,63 @@
 .cinema-spotlight-next { background: var(--cinema-accent); color: var(--cinema-accent-text); border: none; border-radius: 6px; padding: 6px 16px; font-weight: 600; cursor: pointer; }
 
 /* ============================================================
+ * Wave H — verify-it-yourself theatre (H1), causal trace (H2)
+ * ============================================================ */
+
+/* "Verify" button — the moat. */
+.cinema-btn-verify {
+  background: color-mix(in srgb, var(--cinema-proof-ok) 22%, var(--cinema-panel-2));
+  border-color: color-mix(in srgb, var(--cinema-proof-ok) 60%, transparent);
+  color: var(--cinema-text); font-weight: var(--cinema-fw-bold, 700);
+}
+.cinema-btn-verify:hover { background: color-mix(in srgb, var(--cinema-proof-ok) 32%, var(--cinema-panel-2)); }
+
+/* H1 — verification theatre. */
+.cinema-verify-overlay {
+  position: absolute; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 12, 0.62);
+}
+.cinema-verify-card {
+  width: min(560px, 92%); padding: 20px 22px;
+  background: var(--cinema-panel); border: 1px solid var(--cinema-border); border-radius: var(--cinema-radius);
+  box-shadow: var(--cinema-shadow-3);
+}
+.cinema-verify-head { position: relative; margin-bottom: 14px; }
+.cinema-verify-title { margin: 0; font-size: var(--cinema-fs-lg, 16px); font-weight: var(--cinema-fw-black, 800); }
+.cinema-verify-sub { margin: 4px 0 0; font-size: var(--cinema-fs-sm, 12px); color: var(--cinema-muted); }
+.cinema-verify-close { position: absolute; top: -4px; right: -4px; background: none; border: none; color: var(--cinema-muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.cinema-verify-list { list-style: none; margin: 0; padding: 0; }
+.cinema-verify-step {
+  display: grid; grid-template-columns: 22px 1fr auto; grid-template-areas: 'glyph label rung' 'glyph detail detail';
+  gap: 1px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--cinema-border);
+}
+.cinema-verify-glyph { grid-area: glyph; font-size: 16px; text-align: center; color: var(--cinema-muted); }
+.cinema-verify-step[data-status="running"] .cinema-verify-glyph { color: var(--cinema-accent); animation: cinema-spin 900ms linear infinite; }
+.cinema-verify-step[data-status="passed"] .cinema-verify-glyph { color: var(--cinema-proof-ok); }
+.cinema-verify-step[data-status="failed"] .cinema-verify-glyph { color: var(--cinema-frozen); }
+.cinema-verify-step[data-status="skipped"] { opacity: 0.5; }
+@keyframes cinema-spin { to { transform: rotate(360deg); } }
+.cinema-verify-label { grid-area: label; font-size: var(--cinema-fs-base, 13px); font-weight: 600; }
+.cinema-verify-rung { grid-area: rung; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 999px; background: var(--cinema-panel-2); color: var(--cinema-muted); }
+.cinema-verify-rung[data-assurance="l0"] { color: var(--cinema-anchor); }
+.cinema-verify-rung[data-assurance="witness"] { color: var(--cinema-proof-ok); }
+.cinema-verify-rung[data-assurance="replay"] { color: var(--cinema-accent); }
+.cinema-verify-detail { grid-area: detail; font-size: var(--cinema-fs-xs, 11px); color: var(--cinema-muted); font-family: var(--cinema-font-mono); line-height: 1.4; }
+.cinema-verify-verdict { margin: 14px 0 0; font-size: var(--cinema-fs-base, 13px); font-weight: 700; line-height: 1.5; }
+.cinema-verify-verdict[data-ok="1"] { color: var(--cinema-proof-ok); }
+.cinema-verify-verdict[data-ok="0"] { color: var(--cinema-frozen); }
+
+/* H2 — Trace / Why? action + provenance hops. */
+.cinema-detail-actions { margin-bottom: 10px; }
+.cinema-trace-btn {
+  width: 100%; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: var(--cinema-fs-base, 13px);
+  background: color-mix(in srgb, var(--cinema-anchor) 18%, var(--cinema-panel-2));
+  border: 1px solid color-mix(in srgb, var(--cinema-anchor) 55%, transparent); color: var(--cinema-text);
+}
+.cinema-trace-btn:hover { background: color-mix(in srgb, var(--cinema-anchor) 28%, var(--cinema-panel-2)); }
+.cinema-provenance-hop .cinema-detail-val { color: var(--cinema-anchor); }
+
+/* ============================================================
  * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
  * ============================================================ */
 

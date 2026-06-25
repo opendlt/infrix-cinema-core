@@ -179,6 +179,13 @@
         bar.appendChild(story);
       }
 
+      // "Verify it yourself" (H1) — the moat: re-check the bundle in-browser.
+      if (this.opts.canVerify) {
+        const verify = this.btn('cinema-btn-verify', '✓ Verify', 'Verify this bundle yourself (in your browser)', () => this.fire('verify'));
+        verify.classList.add('cinema-btn-verify');
+        bar.appendChild(verify);
+      }
+
       bar.appendChild(this.btn('cinema-btn-legend', 'Legend', 'Toggle legend', () => this.fire('toggleLegend')));
       if (this.caps.controls || this.caps.replay) {
         bar.appendChild(this.btn('btn-screenshot', 'Export', 'Export / share', () => this.fire('export')));

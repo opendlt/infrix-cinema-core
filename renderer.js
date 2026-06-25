@@ -87,6 +87,8 @@ class CinemaRenderer {
         this._camRaf = null;
         // Anchor-confirmation moment (D3): {evId, anId, start} while playing.
         this._anchorMoment = null;
+        // Causal trace path (H2): Set of "from→to" keys lit as a golden chain.
+        this._tracePath = null;
         // Motion hierarchy (D2): reduced-motion flag + the single attention node.
         this.reducedMotion = rendererReducedMotion();
         this._attentionFocus = null;
@@ -145,6 +147,10 @@ class CinemaRenderer {
     /** setLayoutLanes stores spine-lane metadata (from layout.js) to draw behind
      *  the graph; null clears it. */
     setLayoutLanes(lanes) { this._lanes = (lanes && lanes.length) ? lanes : null; this._dirty = true; }
+
+    /** setTracePath lights a causal chain (H2); keys are "from→to" strings. */
+    setTracePath(keys) { this._tracePath = (keys && keys.length) ? new Set(keys) : null; this._dirty = true; }
+    clearTracePath() { this._tracePath = null; this._dirty = true; }
 
     setSceneGraph(graph) {
         const isFirst = !this.sceneGraph;
@@ -535,6 +541,16 @@ class CinemaRenderer {
             ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.7 * edgeT * dim})`;
             ctx.lineWidth = thickness;
             ctx.stroke();
+
+            // Causal trace overlay (H2): a bright golden line over chain edges.
+            if (!isGhost && this._tracePath && this._tracePath.has(edgeKey)) {
+                ctx.beginPath();
+                ctx.moveTo(from.position.x, from.position.y);
+                ctx.lineTo(to.position.x, to.position.y);
+                ctx.strokeStyle = 'rgba(255,215,0,0.95)';
+                ctx.lineWidth = thickness + 3;
+                ctx.stroke();
+            }
 
             // Edge label collected for the screen-space de-clutter pass (A5).
             const isHov = this.hoveredEdge && this.hoveredEdge.fromId === traffic.fromId && this.hoveredEdge.toId === traffic.toId;

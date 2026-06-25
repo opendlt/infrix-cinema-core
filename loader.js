@@ -31,6 +31,8 @@ const SCRIPTS = [
   'agentRibbon.js',
   'cinematic.js',
   'sceneSummary.js',
+  'verify.js',
+  'provenance.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];
