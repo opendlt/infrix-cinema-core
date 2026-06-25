@@ -746,6 +746,28 @@ button.cinema-vital:hover { border-color: var(--cinema-border); }
 .cinema-projection.hidden { display: none; }
 
 /* ============================================================
+ * Wave K — role lens (K1), smart chips (K2)
+ * ============================================================ */
+
+/* K1 — lens selector. */
+.cinema-lens-wrap { display: inline-flex; align-items: center; gap: 5px; }
+.cinema-lens-label { font-size: var(--cinema-fs-xs, 11px); color: var(--cinema-muted); }
+.cinema-lens-select {
+  background: var(--cinema-panel-2); color: var(--cinema-text);
+  border: 1px solid var(--cinema-border); border-radius: 6px; padding: 3px 8px; font-size: var(--cinema-fs-xs, 11px); cursor: pointer;
+}
+
+/* K2 — smart chips. */
+.cinema-smart-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.cinema-smart-chip {
+  font-size: var(--cinema-fs-xs, 11px); padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  background: transparent; border: 1px solid var(--cinema-border); color: var(--cinema-muted);
+  transition: background var(--cinema-dur-fast) var(--cinema-ease-standard), color var(--cinema-dur-fast);
+}
+.cinema-smart-chip:hover { border-color: var(--cinema-accent); color: var(--cinema-text); }
+.cinema-smart-chip.active { background: var(--cinema-accent); color: var(--cinema-accent-text); border-color: transparent; }
+
+/* ============================================================
  * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
  * ============================================================ */
 

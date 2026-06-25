@@ -157,6 +157,22 @@
         }
         bar.appendChild(projGroup);
 
+        // Role lens (K1) — reframe the same scene for a role.
+        if (ns.LENSES) {
+          const lensWrap = document.createElement('label');
+          lensWrap.className = 'cinema-lens-wrap';
+          const lt = document.createElement('span'); lt.className = 'cinema-lens-label'; lt.textContent = 'Lens';
+          const sel = document.createElement('select'); sel.id = 'cinema-lens'; sel.className = 'cinema-lens-select';
+          const none = document.createElement('option'); none.value = ''; none.textContent = 'All'; sel.appendChild(none);
+          for (const role of ['auditor', 'operator', 'regulator', 'agentDev']) {
+            const o = document.createElement('option'); o.value = role; o.textContent = (ns.LENSES[role] && ns.LENSES[role].label) || role; sel.appendChild(o);
+          }
+          sel.addEventListener('change', () => this.fire('lens', sel.value));
+          this._lensSel = sel;
+          lensWrap.appendChild(lt); lensWrap.appendChild(sel);
+          bar.appendChild(lensWrap);
+        }
+
         // Power search (B4): kind:/status:/gas: grammar + result count + stepper.
         const sWrap = document.createElement('div');
         sWrap.className = 'cinema-search-wrap';
@@ -191,6 +207,21 @@
         this.searchNavEl = nav;
 
         bar.appendChild(sWrap);
+
+        // Question-based smart chips (K2) — one-tap answers over the scene.
+        if (ns.SMART_FILTERS) {
+          const chips = document.createElement('div');
+          chips.className = 'cinema-smart-chips';
+          this._smartChips = new Map();
+          for (const f of ns.SMART_FILTERS) {
+            const c = document.createElement('button');
+            c.type = 'button'; c.className = 'cinema-smart-chip'; c.dataset.smart = f.id; c.textContent = f.label;
+            c.addEventListener('click', () => this.fire('smartFilter', f.id));
+            this._smartChips.set(f.id, c);
+            chips.appendChild(c);
+          }
+          bar.appendChild(chips);
+        }
       }
 
       // Cinematic autoplay (G1) — the headline "watch it explain itself" action.
@@ -277,6 +308,12 @@
 
     setStoryPlaying(on) {
       if (this._storyBtn) this._storyBtn.textContent = on ? '⏸ Pause story' : '▶ Play story';
+    }
+
+    setLens(role) { if (this._lensSel) this._lensSel.value = role || ''; }
+    setSmartActive(id) {
+      if (!this._smartChips) return;
+      for (const [fid, c] of this._smartChips) c.classList.toggle('active', fid === id);
     }
 
     setDriftAvailable(on) { if (this._driftBtn) this._driftBtn.classList.toggle('hidden', !on); }

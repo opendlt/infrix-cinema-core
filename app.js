@@ -216,6 +216,11 @@
     function gasOf(n) { try { return renderer.getNodeStats(n.id).totalGas || 0; } catch (_) { return 0; } }
     function runSearch(q) {
       currentQuery = q || '';
+      // A typed query takes over the dim channel from any lens/smart chip (K).
+      if (currentQuery.trim() && (activeChip || activeLens)) {
+        activeChip = null; activeLens = '';
+        if (controls) { controls.setSmartActive(null); controls.setLens(''); }
+      }
       const parsed = ns.parseSearchQuery ? ns.parseSearchQuery(currentQuery) : { isEmpty: !currentQuery.trim() };
       filterActive = !parsed.isEmpty;
       matchedIds = [];
@@ -528,6 +533,76 @@
       if (projectionView) projectionView.setMode(m === 'graph' ? null : m, renderer.sceneGraph);
     }
 
+    // ---- Wave K: role lens (K1) + question-based smart chips (K2) ----
+    let activeLens = '';
+    let activeChip = null;
+    function smartCtx() {
+      const c = sceneCeiling();
+      const drifted = (driftView && driftView.drift) ? new Set(ns.driftedNodeIds(driftView.drift)) : new Set();
+      return { anchored: c === 'l0' || c === 'witness', driftedIds: drifted };
+    }
+    function sceneNodes() {
+      const g = renderer.sceneGraph; if (!g) return [];
+      return Array.isArray(g.nodes) ? g.nodes : Object.values(g.nodes || {});
+    }
+    // recomputeDim is the single authority over the lens/chip opacity channel.
+    function recomputeDim() {
+      const nodes = sceneNodes();
+      for (const n of nodes) if (n._origOpacity == null) n._origOpacity = (n.opacity != null ? n.opacity : 1);
+      if (activeChip && ns.runSmartFilter) {
+        const ids = new Set(ns.runSmartFilter(renderer.sceneGraph, activeChip, smartCtx()));
+        matchedIds = [...ids];
+        for (const n of nodes) n.opacity = ids.has(n.id) ? n._origOpacity : 0.12;
+        if (controls) controls.setSearchCount(matchedIds.length, true);
+        filterActive = true;
+      } else if (activeLens && ns.lensEmphasis) {
+        const ids = new Set(ns.lensEmphasis(renderer.sceneGraph, activeLens));
+        for (const n of nodes) n.opacity = (ids.size === 0 || ids.has(n.id)) ? n._origOpacity : 0.4;
+        if (controls) controls.setSearchCount(0, false);
+        filterActive = false;
+      } else {
+        for (const n of nodes) n.opacity = n._origOpacity;
+        if (controls) controls.setSearchCount(0, false);
+        filterActive = false;
+      }
+      renderer.requestRender();
+      refreshOverlay();
+    }
+    // reapplyDim restores the active dim source (search ▸ chip ▸ lens) for a new scene.
+    function reapplyDim() {
+      if (currentQuery && currentQuery.trim()) runSearch(currentQuery);
+      else if (activeChip || activeLens) recomputeDim();
+    }
+    function applyRole(role, opts) {
+      opts = opts || {};
+      activeLens = role || '';
+      activeChip = null;
+      currentQuery = ''; if (controls) controls.setSearchValue('');
+      if (controls) { controls.setSmartActive(null); controls.setLens(activeLens); }
+      persistLens(activeLens);
+      recomputeDim();
+      if (!role || opts.silent) return;
+      const L = ns.applyLens(role);
+      if (L.view) ctrlSetView(L.view);
+      if (L.primaryAction === 'verify') openVerifyTheatre();
+      else if (L.primaryAction === 'playStory') { if (cinematic && cinematic.hasStory()) cinematic.play(); }
+      else if (L.primaryAction === 'jumpAnomaly') vitalsJump('anomaly');
+    }
+    function applySmartFilter(id) {
+      activeChip = (activeChip === id) ? null : id;
+      currentQuery = ''; if (controls) controls.setSearchValue('');
+      if (activeChip) { activeLens = ''; if (controls) controls.setLens(''); }
+      if (controls) controls.setSmartActive(activeChip);
+      recomputeDim();
+      if (activeChip && matchedIds.length && renderer.fitToNodes) renderer.fitToNodes(matchedIds);
+    }
+    function ctrlSetView(m) {
+      viewMode = m; applyViewMode(rootEl, m); persistViewMode(mode, m);
+      for (const b of rootEl.querySelectorAll('.cinema-view-btn')) { const on = b.dataset.view === m; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    }
+    function persistLens(role) { if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.lens', role || ''); } catch (_) {} } }
+    function readLens() { try { return localStorage.getItem('cinema.lens') || ''; } catch (_) { return ''; } }
+
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
       if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
@@ -611,11 +686,16 @@
           verify: () => openVerifyTheatre(),
           toggleDrift: () => toggleDrift(),
           projection: (m) => setProjection(m),
+          lens: (role) => applyRole(role),
+          smartFilter: (id) => applySmartFilter(id),
         },
       });
       // Restore a persisted query so a returning operator keeps their filter.
       const q0 = readSearch();
       if (q0) { controls.setSearchValue(q0); runSearch(q0); }
+      // Restore a persisted lens (emphasis only — no primary action on restore).
+      const lr0 = readLens();
+      if (lr0 && !q0) { controls.setLens(lr0); applyRole(lr0, { silent: true }); }
     }
 
     // ---- Cinematic autoplay (G1) ----
@@ -657,7 +737,7 @@
         // disturbing the rest (no animation/refit on incremental updates).
         if (ns.needsLayout && ns.needsLayout(renderer.sceneGraph)) applyLayout(renderer.sceneGraph, { animate: false });
         if (a11y) a11y.setScene(renderer.sceneGraph);
-        if (filterActive) runSearch(currentQuery);
+        reapplyDim();
         buildNodeAssurance();
         updateDisclosureChip();
         if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);
@@ -674,7 +754,7 @@
         try { narrative.setScene(g || {}, { proof: options.proof || (dataSource && dataSource.proof) || null }); } catch (e) {}
       }
       if (a11y) a11y.setScene(renderer.sceneGraph);
-      if (filterActive) runSearch(currentQuery);
+      reapplyDim();
       buildNodeAssurance();
       updateDisclosureChip();
       if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);

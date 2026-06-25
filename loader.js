@@ -39,6 +39,8 @@ const SCRIPTS = [
   'minimap.js',
   'timelineInstrument.js',
   'projections.js',
+  'lens.js',
+  'smartFilters.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];
