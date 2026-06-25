@@ -516,3 +516,36 @@
 .cinema-agent-step.barrier::before { content: '⛔ '; }
 .cinema-agent-why { margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--cinema-text); }
 .cinema-agent-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+
+/* ============================================================
+ * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
+ * ============================================================ */
+
+/* Depth: flat panels gain elevation so the chrome reads as layered, not painted. */
+.cinema-panel, .cinema-narrative-panel { box-shadow: var(--cinema-shadow-2); }
+.cinema-controls, .cinema-transport { box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.22); }
+.cinema-export-menu, .cinema-tooltip { box-shadow: var(--cinema-shadow-2); }
+.cinema-dialog-content, .cinema-state-card, .cinema-agent-ribbon { box-shadow: var(--cinema-shadow-3); }
+.cinema-legend { box-shadow: var(--cinema-shadow-2); }
+
+/* Premium feel: interactive chrome eases on hover/active instead of snapping. */
+.cinema-btn, .cinema-view-btn, .cinema-speed-btn, .cinema-layout-btn,
+.cinema-trust-rung, .cinema-tick, .cinema-narrative-filter, .cinema-export-item, .cinema-search-navbtn {
+  transition: background var(--cinema-dur-fast) var(--cinema-ease-standard),
+              border-color var(--cinema-dur-fast) var(--cinema-ease-standard),
+              color var(--cinema-dur-fast) var(--cinema-ease-standard);
+}
+.cinema-narrative-card-btn { transition: border-color var(--cinema-dur-fast) var(--cinema-ease-standard), box-shadow var(--cinema-dur-fast) var(--cinema-ease-standard); }
+.cinema-state-action { transition: filter var(--cinema-dur-fast) var(--cinema-ease-standard); }
+.cinema-state-action:hover { filter: brightness(1.08); }
+
+/* Honor reduced-motion across ALL chrome (the canvas honors it in the renderer):
+ * collapse animations + transitions, and kill the trust-rung pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .cinema-root *, .cinema-tooltip, .cinema-state-overlay, .cinema-agent-ribbon {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .cinema-trust-rung.pulse .cinema-trust-dot { animation: none !important; }
+}

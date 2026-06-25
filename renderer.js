@@ -27,6 +27,26 @@
     catch (_) { return false; }
   }
 
+  // Motion hierarchy (D2): a single "attention" node animates; everything else
+  // stays calm. severityOf ranks how much a node demands attention.
+  function severityOf(node) {
+    if (!node) return 0;
+    if (node.breakerState === 'frozen') return 100;
+    if (node.anomalyScore > 0) return 60 + Math.min(1, node.anomalyScore) * 20;
+    if (node.breakerState === 'paused') return 50;
+    if (node.quarantined) return 40;
+    if (node.breakerState === 'throttled') return 20;
+    return 0;
+  }
+  function computeAttention(nodes) {
+    let best = null, bestSev = 0;
+    for (const n of (nodes || [])) {
+      const s = severityOf(n);
+      if (s > bestSev) { bestSev = s; best = n.id; }
+    }
+    return bestSev > 0 ? best : null;
+  }
+
 class CinemaRenderer {
     constructor(canvas) {
         this.canvas = canvas;
@@ -64,6 +84,17 @@ class CinemaRenderer {
         this._camRaf = null;
         // Anchor-confirmation moment (D3): {evId, anId, start} while playing.
         this._anchorMoment = null;
+        // Motion hierarchy (D2): reduced-motion flag + the single attention node.
+        this.reducedMotion = rendererReducedMotion();
+        this._attentionFocus = null;
+        this._mql = null;
+        try {
+            if (typeof window !== 'undefined' && window.matchMedia) {
+                this._mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+                this._onMotionPref = (e) => { this.reducedMotion = !!(e && e.matches); };
+                if (this._mql.addEventListener) this._mql.addEventListener('change', this._onMotionPref);
+            }
+        } catch (_) {}
 
         this.resizeCanvas();
         this._onResize = () => this.resizeCanvas();
@@ -126,8 +157,17 @@ class CinemaRenderer {
         }
 
         this.sceneGraph = graph;
+        this._computeAttention();
         if (isFirst) this.fitToView();
         this.requestRender();
+    }
+
+    // _computeAttention picks the single highest-severity node so only it animates.
+    _computeAttention() {
+        let nodes = this.sceneGraph && (this.sceneGraph.nodes || this.sceneGraph.Nodes);
+        if (!nodes) { this._attentionFocus = null; return; }
+        if (!Array.isArray(nodes)) nodes = Object.values(nodes);
+        this._attentionFocus = computeAttention(nodes);
     }
 
     fitToView() {
@@ -190,6 +230,7 @@ class CinemaRenderer {
         addedEdges.forEach(e => { this.sceneGraph.edges[e.id || e.ID] = e; });
         removedEdges.forEach(id => { delete this.sceneGraph.edges[id]; });
 
+        this._computeAttention();
         this.requestRender();
     }
 
@@ -243,6 +284,9 @@ class CinemaRenderer {
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
 
+        // Depth (D1): parallax dot-field + vignette, in screen space.
+        this._drawBackdrop();
+
         ctx.save();
         ctx.translate(w / 2 + camera.x, h / 2 + camera.y);
         ctx.scale(camera.zoom, camera.zoom);
@@ -273,6 +317,25 @@ class CinemaRenderer {
         // Labels are drawn last, in screen space, with collision avoidance (A5).
         this.drawLabels();
         this.drawHUD();
+    }
+
+    // _drawBackdrop adds spatial depth (D1): a faint dot-field that drifts with
+    // panning (parallax) + an edge vignette. Drawn in screen space.
+    _drawBackdrop() {
+        const { ctx, camera } = this;
+        const w = this.cssWidth, h = this.cssHeight;
+        const gap = 44;
+        const ox = ((camera.x % gap) + gap) % gap;
+        const oy = ((camera.y % gap) + gap) % gap;
+        ctx.fillStyle = 'rgba(150,160,210,0.05)';
+        for (let x = ox; x < w; x += gap) {
+            for (let y = oy; y < h; y += gap) ctx.fillRect(x, y, 1.4, 1.4);
+        }
+        const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.75);
+        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(1, 'rgba(0,0,0,0.38)');
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, w, h);
     }
 
     // drawLanes paints faint vertical bands + headers for the spine layout so
@@ -389,12 +452,13 @@ class CinemaRenderer {
                 });
             }
 
-            // Animated particles -- more particles for higher traffic
-            if (traffic.animated && !isGhost && dim === 1) {
+            // Ambient flow particles (D2) — calm: fewer/smaller, and frozen under
+            // reduced-motion. The one ambient layer, never competing for attention.
+            if (traffic.animated && !isGhost && dim === 1 && !this.reducedMotion) {
                 const particleEdge = {
-                    particleCount: Math.min(8, 2 + traffic.count),
-                    particleSpeed: 1.5 + traffic.count * 0.3,
-                    particleSize: Math.min(7, 3 + traffic.count * 0.5),
+                    particleCount: Math.min(5, 1 + traffic.count),
+                    particleSpeed: 1.2 + traffic.count * 0.22,
+                    particleSize: Math.min(5, 2 + traffic.count * 0.4),
                 };
                 this.drawFlowParticle(from.position, to.position, particleEdge, c);
             }
@@ -428,8 +492,12 @@ class CinemaRenderer {
             const entryScale = entryT < 1 ? entryT * (2.7 * entryT * entryT - 1.7 * entryT + 1) : 1;
             const entryAlpha = Math.min(1, entryT * 2);
 
-            // Pulse effect: size oscillates based on activity + time
-            const pulseAmount = activity > 0 ? Math.sin(this.particlePhase * 3) * (2 + activity * 0.5) : 0;
+            // Motion hierarchy (D2): only the single attention-focus node pulses;
+            // every other node holds a steady size, so the eye lands on what matters
+            // instead of a field of competing throbs.
+            const motion = !this.reducedMotion;
+            const isFocus = !isGhost && node.id === this._attentionFocus;
+            const pulseAmount = (motion && isFocus) ? Math.sin(this.particlePhase * 3) * 2.5 : 0;
             const activityBonus = Math.min(15, activity * 2);
             const baseSize = (node.size || 10) + activityBonus;
             const radius = (baseSize + pulseAmount) * entryScale * (this.selectedNode === node.id ? 1.3 : 1.0);
@@ -440,19 +508,16 @@ class CinemaRenderer {
             // Cache the actual rendered radius (label anchoring + hit testing).
             if (!isGhost) this._nodeRenderRadius.set(node.id, radius);
 
-            // Quarantine shake offset
-            let sx = 0, sy = 0;
-            if (node.quarantined && !isGhost) {
-                sx = 3 * Math.sin(this.particlePhase * 20) * Math.cos(this.particlePhase * 7);
-                sy = 3 * Math.sin(this.particlePhase * 23) * Math.sin(this.particlePhase * 11);
-            }
-            const nx = node.position.x + sx;
-            const ny = node.position.y + sy;
+            // Nodes never jitter (D2): the static dashed hazard border below is the
+            // legible quarantine indicator; the shake is gone.
+            const nx = node.position.x;
+            const ny = node.position.y;
 
-            // Anomaly glow (pulsing red radial gradient)
+            // Anomaly glow — pulses ONLY when this is the attention focus; other
+            // anomalous nodes get a calm static glow that is still clearly red.
             if (node.anomalyScore > 0 && !isGhost) {
-                const glowR = radius + 20 * node.anomalyScore;
-                const ga = 0.25 + 0.15 * Math.sin(this.particlePhase * 4);
+                const glowR = radius + 20 * Math.min(1, node.anomalyScore) + (isFocus ? 6 : 0);
+                const ga = (motion && isFocus) ? (0.28 + 0.16 * Math.sin(this.particlePhase * 4)) : 0.2;
                 const grad = ctx.createRadialGradient(nx, ny, radius, nx, ny, glowR);
                 grad.addColorStop(0, `rgba(255,87,34,${ga})`);
                 grad.addColorStop(1, 'rgba(255,87,34,0)');
@@ -462,19 +527,18 @@ class CinemaRenderer {
                 ctx.fill();
             }
 
-            // Circuit breaker ring
+            // Circuit breaker ring — static dashed ring; gentle pulse + slow spin
+            // ONLY for the attention focus, otherwise calm and legible.
             if (node.breakerState && !isGhost) {
                 const ringR = radius + 6;
-                let ringColor, ringPulse;
+                const animate = motion && isFocus;
+                let ringColor;
                 if (node.breakerState === 'throttled') {
-                    ringPulse = 0.4 + 0.3 * Math.sin(this.particlePhase * 2);
-                    ringColor = `rgba(255,193,7,${ringPulse})`;
+                    ringColor = `rgba(255,193,7,${animate ? 0.4 + 0.3 * Math.sin(this.particlePhase * 2) : 0.65})`;
                 } else if (node.breakerState === 'paused') {
-                    ringPulse = 0.5 + 0.3 * Math.sin(this.particlePhase * 4);
-                    ringColor = `rgba(255,152,0,${ringPulse})`;
+                    ringColor = `rgba(255,152,0,${animate ? 0.5 + 0.3 * Math.sin(this.particlePhase * 4) : 0.72})`;
                 } else if (node.breakerState === 'frozen') {
-                    ringPulse = 0.6 + 0.4 * Math.abs(Math.sin(this.particlePhase * 8));
-                    ringColor = `rgba(244,67,54,${ringPulse})`;
+                    ringColor = `rgba(244,67,54,${animate ? 0.6 + 0.4 * Math.abs(Math.sin(this.particlePhase * 8)) : 0.85})`;
                 }
                 if (ringColor) {
                     ctx.beginPath();
@@ -482,7 +546,7 @@ class CinemaRenderer {
                     ctx.strokeStyle = ringColor;
                     ctx.lineWidth = 3;
                     ctx.setLineDash([4, 4]);
-                    ctx.lineDashOffset = this.particlePhase * 20;
+                    ctx.lineDashOffset = animate ? this.particlePhase * 20 : 0;
                     ctx.stroke();
                     ctx.setLineDash([]);
                 }
@@ -514,7 +578,7 @@ class CinemaRenderer {
                 ctx.strokeStyle = 'rgba(92,212,228,0.95)';
                 ctx.lineWidth = 2.5;
                 ctx.setLineDash([5, 4]);
-                ctx.lineDashOffset = -this.particlePhase * 15;
+                ctx.lineDashOffset = motion ? -this.particlePhase * 15 : 0;
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
@@ -573,20 +637,22 @@ class CinemaRenderer {
                 ctx.arc(nx, ny, radius, 0, Math.PI * 2);
                 ctx.fillStyle = `rgba(220,224,236,${0.10 * entryAlpha})`;
                 ctx.fill();
-                // shimmer sweep
-                const sweep = (this.particlePhase * 0.6) % (Math.PI * 2);
-                ctx.beginPath();
-                ctx.arc(nx, ny, radius, sweep, sweep + 0.6);
-                ctx.strokeStyle = `rgba(235,238,248,${0.5 * entryAlpha})`;
-                ctx.lineWidth = 2;
-                ctx.stroke();
+                // shimmer sweep (frosted glass) — motion only
+                if (motion) {
+                    const sweep = (this.particlePhase * 0.6) % (Math.PI * 2);
+                    ctx.beginPath();
+                    ctx.arc(nx, ny, radius, sweep, sweep + 0.6);
+                    ctx.strokeStyle = `rgba(235,238,248,${0.5 * entryAlpha})`;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
                 // dashed seal ring
                 ctx.beginPath();
                 ctx.arc(nx, ny, radius + 4, 0, Math.PI * 2);
                 ctx.strokeStyle = disclosable ? `rgba(92,212,228,${0.9 * entryAlpha})` : `rgba(158,158,158,${0.8 * entryAlpha})`;
                 ctx.lineWidth = 1.5;
                 ctx.setLineDash([3, 3]);
-                ctx.lineDashOffset = -this.particlePhase * 10;
+                ctx.lineDashOffset = motion ? -this.particlePhase * 10 : 0;
                 ctx.stroke();
                 ctx.setLineDash([]);
                 // centered lock glyph
@@ -1057,6 +1123,7 @@ class CinemaRenderer {
             if (this._onDblClick) c.removeEventListener('dblclick', this._onDblClick);
             if (this._onPointerLeave) c.removeEventListener('pointerleave', this._onPointerLeave);
         }
+        if (this._mql && this._onMotionPref && this._mql.removeEventListener) this._mql.removeEventListener('change', this._onMotionPref);
     }
 }
 
@@ -1087,5 +1154,7 @@ class CinemaRenderer {
   ns.CinemaRenderer = CinemaRenderer;
   ns.placeLabels = placeLabels;
   ns.rectsIntersect = rectsIntersect;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { CinemaRenderer, placeLabels, rectsIntersect };
+  ns.severityOf = severityOf;
+  ns.computeAttention = computeAttention;
+  if (typeof module !== 'undefined' && module.exports) module.exports = { CinemaRenderer, placeLabels, rectsIntersect, severityOf, computeAttention };
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
