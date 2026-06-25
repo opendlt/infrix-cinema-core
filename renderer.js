@@ -19,6 +19,14 @@
   const FONT_UI = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   const FONT_MONO = 'SFMono-Regular, Menlo, Consolas, monospace';
 
+  // A pointer gesture is a click (not a pan) only if it moves less than this (CSS px).
+  const DRAG_THRESHOLD = 4;
+  function easeInOutRenderer(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+  function rendererReducedMotion() {
+    try { return !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (_) { return false; }
+  }
+
 class CinemaRenderer {
     constructor(canvas) {
         this.canvas = canvas;
@@ -51,6 +59,9 @@ class CinemaRenderer {
         this._nodeRenderRadius = new Map();
         // Label candidates collected during drawGraph, placed in render() (A5).
         this._labelCandidates = [];
+        // Keyboard focus ring target (B5) + camera animation handle (B1/B4).
+        this._focusedNode = null;
+        this._camRaf = null;
 
         this.resizeCanvas();
         this._onResize = () => this.resizeCanvas();
@@ -327,6 +338,12 @@ class CinemaRenderer {
 
             const c = traffic.color || { r: 100, g: 150, b: 255, a: 200 };
 
+            // Dim edges whose endpoints were filtered out (B4): tie edge alpha to
+            // the dimmer of the two node opacities so the filter reads on edges too.
+            const fOp = from.opacity == null ? 1 : from.opacity;
+            const tOp = to.opacity == null ? 1 : to.opacity;
+            const dim = Math.min(fOp, tOp) < 1 ? 0.22 : 1;
+
             // Edge thickness grows with call count (min 2, max 12)
             const thickness = Math.min(12, 2 + traffic.count * 1.5);
 
@@ -339,7 +356,7 @@ class CinemaRenderer {
             ctx.beginPath();
             ctx.moveTo(from.position.x, from.position.y);
             ctx.lineTo(tx, ty);
-            ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.15 * edgeT})`;
+            ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.15 * edgeT * dim})`;
             ctx.lineWidth = glowSize;
             ctx.stroke();
 
@@ -347,15 +364,15 @@ class CinemaRenderer {
             ctx.beginPath();
             ctx.moveTo(from.position.x, from.position.y);
             ctx.lineTo(tx, ty);
-            ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.7 * edgeT})`;
+            ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.7 * edgeT * dim})`;
             ctx.lineWidth = thickness;
             ctx.stroke();
 
             // Edge label collected for the screen-space de-clutter pass (A5).
-            if (!isGhost && traffic.label) {
+            const isHov = this.hoveredEdge && this.hoveredEdge.fromId === traffic.fromId && this.hoveredEdge.toId === traffic.toId;
+            if (!isGhost && traffic.label && (dim === 1 || isHov)) {
                 const midX = (from.position.x + to.position.x) / 2;
                 const midY = (from.position.y + to.position.y) / 2;
-                const isHov = this.hoveredEdge && this.hoveredEdge.fromId === traffic.fromId && this.hoveredEdge.toId === traffic.toId;
                 const callLabel = traffic.count > 1 ? `${traffic.label} (×${traffic.count})` : traffic.label;
                 this._labelCandidates.push({
                     kind: 'edge', wx: midX, wy: midY, anchorPx: 0,
@@ -368,7 +385,7 @@ class CinemaRenderer {
             }
 
             // Animated particles -- more particles for higher traffic
-            if (traffic.animated && !isGhost) {
+            if (traffic.animated && !isGhost && dim === 1) {
                 const particleEdge = {
                     particleCount: Math.min(8, 2 + traffic.count),
                     particleSpeed: 1.5 + traffic.count * 0.3,
@@ -483,6 +500,18 @@ class CinemaRenderer {
                 ctx.arc(nx, ny, radius + 6, 0, Math.PI * 2);
                 ctx.fillStyle = `rgba(${c.r},${c.g},${c.b},0.2)`;
                 ctx.fill();
+            }
+
+            // Keyboard focus ring (B5) — distinct dashed accent ring.
+            if (this._focusedNode === node.id && !isGhost) {
+                ctx.beginPath();
+                ctx.arc(nx, ny, radius + 9, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(92,212,228,0.95)';
+                ctx.lineWidth = 2.5;
+                ctx.setLineDash([5, 4]);
+                ctx.lineDashOffset = -this.particlePhase * 15;
+                ctx.stroke();
+                ctx.setLineDash([]);
             }
 
             // Node shape
@@ -660,61 +689,221 @@ class CinemaRenderer {
         this.ctx.fillText(`${this.fps} FPS`, 8, 14);
     }
 
+    // Pointer Events unify mouse + touch (B1 + B2). A gesture is a CLICK only if
+    // it moved < DRAG_THRESHOLD; otherwise it pans. Two pointers pinch-zoom.
     setupInteraction() {
-        this.canvas.addEventListener('wheel', (e) => {
+        const canvas = this.canvas;
+        this._pointers = new Map();   // pointerId -> {x,y,type}
+        this._pinchPrev = null;
+        this._gesture = null;         // single-pointer gesture state
+
+        this._onWheel = (e) => {
             e.preventDefault();
-            const factor = e.deltaY > 0 ? 0.9 : 1.1;
-            this.camera.zoom = Math.max(0.05, Math.min(20, this.camera.zoom * factor));
-        });
+            this._zoomAbout(e.clientX, e.clientY, e.deltaY > 0 ? 0.9 : 1.1);
+        };
+        canvas.addEventListener('wheel', this._onWheel, { passive: false });
 
-        this.canvas.addEventListener('mousedown', (e) => {
-            this.isDragging = true;
-            this.lastMouse = { x: e.clientX, y: e.clientY };
-            const node = this.hitTestNode(e.clientX, e.clientY);
-            if (node) {
-                this.selectedNode = node.id;
-                this.emit('nodeSelected', node);
-            } else {
-                this.selectedNode = null;
+        this._onPointerDown = (e) => {
+            if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
+            this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+            if (this._pointers.size === 1) {
+                this._gesture = { id: e.pointerId, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY, moved: false, type: e.pointerType };
+                canvas.style.cursor = 'grabbing';
+            } else if (this._pointers.size === 2) {
+                this._gesture = null;            // second finger cancels click/drag → pinch
+                this._pinchPrev = this._pinchState();
             }
-        });
+        };
 
-        this.canvas.addEventListener('mousemove', (e) => {
-            if (this.isDragging) {
-                this.camera.x += e.clientX - this.lastMouse.x;
-                this.camera.y += e.clientY - this.lastMouse.y;
-                this.lastMouse = { x: e.clientX, y: e.clientY };
-            } else {
-                const node = this.hitTestNode(e.clientX, e.clientY);
-                this.hoveredNode = node ? node.id : null;
-                if (node) {
-                    this.hoveredEdge = null;
-                    this.emit('nodeHovered', node);
-                } else {
-                    const edge = this.hitTestEdge(e.clientX, e.clientY);
-                    this.hoveredEdge = edge;
-                    if (edge) this.emit('edgeHovered', edge);
+        this._onPointerMove = (e) => {
+            const p = this._pointers.get(e.pointerId);
+            if (p) { p.x = e.clientX; p.y = e.clientY; }
+
+            if (this._pointers.size >= 2) {       // pinch-zoom + two-finger pan
+                const cur = this._pinchState();
+                if (this._pinchPrev && this._pinchPrev.dist) {
+                    this._zoomAbout(cur.midX, cur.midY, cur.dist / this._pinchPrev.dist);
+                    this.camera.x += cur.midX - this._pinchPrev.midX;
+                    this.camera.y += cur.midY - this._pinchPrev.midY;
                 }
+                this._pinchPrev = cur;
+                return;
             }
-        });
 
-        this.canvas.addEventListener('mouseup', () => { this.isDragging = false; });
-        this.canvas.addEventListener('mouseleave', () => { this.isDragging = false; });
+            const g = this._gesture;
+            if (g && this._pointers.has(g.id)) {
+                const dx = e.clientX - g.startX, dy = e.clientY - g.startY;
+                if (!g.moved && dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD) g.moved = true;
+                if (g.moved) {
+                    this.camera.x += e.clientX - g.lastX;
+                    this.camera.y += e.clientY - g.lastY;
+                    g.lastX = e.clientX; g.lastY = e.clientY;
+                }
+                return;
+            }
+
+            if (e.pointerType === 'mouse') this._hover(e.clientX, e.clientY);
+        };
+
+        this._onPointerUp = (e) => {
+            if (canvas.releasePointerCapture) { try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} }
+            const g = this._gesture;
+            const wasClick = g && g.id === e.pointerId && !g.moved;
+            this._pointers.delete(e.pointerId);
+            if (this._pointers.size < 2) this._pinchPrev = null;
+            canvas.style.cursor = this._pointers.size ? 'grabbing' : '';
+            if (wasClick && this._pointers.size === 0) this._click(e.clientX, e.clientY, g.type !== 'mouse');
+            if (g && g.id === e.pointerId) this._gesture = null;
+        };
+
+        canvas.addEventListener('pointerdown', this._onPointerDown);
+        canvas.addEventListener('pointermove', this._onPointerMove);
+        canvas.addEventListener('pointerup', this._onPointerUp);
+        canvas.addEventListener('pointercancel', this._onPointerUp);
+
+        this._onDblClick = (e) => { const n = this.hitTestNode(e.clientX, e.clientY); if (n) this.flyTo(n); };
+        canvas.addEventListener('dblclick', this._onDblClick);
+
+        this._onPointerLeave = () => {
+            if (this.hoveredNode || this.hoveredEdge) { this.hoveredNode = null; this.hoveredEdge = null; this.emit('hoverEnd'); }
+            this.canvas.style.cursor = '';
+        };
+        canvas.addEventListener('pointerleave', this._onPointerLeave);
     }
 
-    hitTestNode(clientX, clientY) {
+    _pinchState() {
+        const pts = [...this._pointers.values()];
+        const a = pts[0], b = pts[1];
+        if (!a || !b) return { dist: 0, midX: 0, midY: 0 };
+        return { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, midX: (a.x + b.x) / 2, midY: (a.y + b.y) / 2 };
+    }
+
+    // _zoomAbout keeps the world point under (clientX,clientY) fixed while zooming.
+    _zoomAbout(clientX, clientY, factor) {
+        const rect = this.canvas.getBoundingClientRect();
+        const sx = clientX - rect.left, sy = clientY - rect.top;
+        const wx = (sx - this.cssWidth / 2 - this.camera.x) / this.camera.zoom;
+        const wy = (sy - this.cssHeight / 2 - this.camera.y) / this.camera.zoom;
+        const z = Math.max(0.05, Math.min(20, this.camera.zoom * factor));
+        this.camera.zoom = z;
+        this.camera.x = sx - this.cssWidth / 2 - wx * z;
+        this.camera.y = sy - this.cssHeight / 2 - wy * z;
+    }
+
+    _hover(clientX, clientY) {
+        const node = this.hitTestNode(clientX, clientY);
+        if (node) {
+            this.hoveredEdge = null;
+            this.hoveredNode = node.id;
+            this.canvas.style.cursor = 'pointer';
+            const s = this._worldToClient(node.position);
+            this.emit('nodeHovered', { node, x: s.x, y: s.y });
+            return;
+        }
+        this.hoveredNode = null;
+        const edge = this.hitTestEdge(clientX, clientY);
+        if (edge) {
+            this.hoveredEdge = edge;
+            this.canvas.style.cursor = 'pointer';
+            this.emit('edgeHovered', { edge, x: clientX, y: clientY });
+        } else {
+            if (this.hoveredEdge) { this.hoveredEdge = null; }
+            this.canvas.style.cursor = 'grab';
+            this.emit('hoverEnd');
+        }
+    }
+
+    _click(clientX, clientY, coarse) {
+        const node = this.hitTestNode(clientX, clientY, { coarse });
+        if (node) { this.selectedNode = node.id; this.emit('nodeSelected', node); return; }
+        const edge = this.hitTestEdge(clientX, clientY);
+        if (edge) { this.emit('edgeSelected', edge); return; }
+        this.selectedNode = null;
+        this.emit('backgroundClicked');
+    }
+
+    _worldToClient(pos) {
+        const rect = this.canvas.getBoundingClientRect();
+        return {
+            x: rect.left + this.cssWidth / 2 + this.camera.x + pos.x * this.camera.zoom,
+            y: rect.top + this.cssHeight / 2 + this.camera.y + pos.y * this.camera.zoom,
+        };
+    }
+
+    _findNode(id) {
+        if (!this.sceneGraph) return null;
+        let nodes = this.sceneGraph.nodes || this.sceneGraph.Nodes;
+        if (!nodes) return null;
+        if (!Array.isArray(nodes)) nodes = Object.values(nodes);
+        return nodes.find((n) => n.id === id) || null;
+    }
+
+    // flyTo animates the camera to center a node at a comfortable zoom (B1).
+    flyTo(node, opts) {
+        if (typeof node === 'string') node = this._findNode(node);
+        if (!node || !node.position) return;
+        opts = opts || {};
+        const z = opts.zoom || Math.max(this.camera.zoom, 1.4);
+        this._animateCamera({ x: -node.position.x * z, y: -node.position.y * z, zoom: z }, opts.duration || 380);
+    }
+
+    // fitToNodes frames a subset of nodes (B4 — fit-to-matches).
+    fitToNodes(ids) {
+        if (!this.sceneGraph || !ids || !ids.length) return;
+        let nodes = this.sceneGraph.nodes || this.sceneGraph.Nodes;
+        if (!Array.isArray(nodes)) nodes = Object.values(nodes);
+        const set = new Set(ids);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+            if (!set.has(n.id) || !n.position) continue;
+            const r = (this._nodeRenderRadius.get(n.id) || n.size || 10) + 26;
+            minX = Math.min(minX, n.position.x - r); minY = Math.min(minY, n.position.y - r);
+            maxX = Math.max(maxX, n.position.x + r); maxY = Math.max(maxY, n.position.y + r);
+        }
+        if (!isFinite(minX)) return;
+        const w = maxX - minX || 1, h = maxY - minY || 1;
+        const z = Math.min((this.cssWidth * 0.8) / w, (this.cssHeight * 0.8) / h, 3);
+        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+        this._animateCamera({ x: -cx * z, y: -cy * z, zoom: z }, 420);
+    }
+
+    setKeyboardFocus(id) {
+        this._focusedNode = id || null;
+        if (id) { const n = this._findNode(id); if (n && n.position) this.flyTo(n, { zoom: Math.max(this.camera.zoom, 1.2), duration: 260 }); }
+    }
+
+    _animateCamera(to, duration) {
+        if (rendererReducedMotion()) { this.camera.x = to.x; this.camera.y = to.y; this.camera.zoom = to.zoom; return; }
+        if (this._camRaf) cancelAnimationFrame(this._camRaf);
+        const from = { x: this.camera.x, y: this.camera.y, zoom: this.camera.zoom };
+        const start = performance.now();
+        const step = () => {
+            const k = easeInOutRenderer(Math.min(1, (performance.now() - start) / duration));
+            this.camera.x = from.x + (to.x - from.x) * k;
+            this.camera.y = from.y + (to.y - from.y) * k;
+            this.camera.zoom = from.zoom + (to.zoom - from.zoom) * k;
+            this._camRaf = k < 1 ? requestAnimationFrame(step) : null;
+        };
+        this._camRaf = requestAnimationFrame(step);
+    }
+
+    // hitTestNode tests against the CACHED RENDERED radius (B3) — the visible
+    // disc, not size+5 — and returns the top-most node (reverse draw order).
+    hitTestNode(clientX, clientY, opts) {
         if (!this.sceneGraph || !this.sceneGraph.nodes) return null;
         const rect = this.canvas.getBoundingClientRect();
         const cx = (clientX - rect.left - this.cssWidth / 2 - this.camera.x) / this.camera.zoom;
         const cy = (clientY - rect.top - this.cssHeight / 2 - this.camera.y) / this.camera.zoom;
+        const pad = (opts && opts.coarse) ? 9 : 2;
 
         let nodes = this.sceneGraph.nodes;
         if (!Array.isArray(nodes)) nodes = Object.values(nodes);
-        for (const node of nodes) {
+        for (let i = nodes.length - 1; i >= 0; i--) {
+            const node = nodes[i];
             if (!node.position) continue;
-            const dx = cx - node.position.x;
-            const dy = cy - node.position.y;
-            const r = (node.size || 10) + 5;
+            const rr = this._nodeRenderRadius.get(node.id);
+            const r = (rr != null ? rr : (node.size || 10)) + pad;
+            const dx = cx - node.position.x, dy = cy - node.position.y;
             if (dx * dx + dy * dy <= r * r) return node;
         }
         return null;
@@ -786,8 +975,18 @@ class CinemaRenderer {
 
     destroy() {
         if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
+        if (this._camRaf) cancelAnimationFrame(this._camRaf);
         if (this._resizeObserver) { try { this._resizeObserver.disconnect(); } catch (e) {} this._resizeObserver = null; }
         else if (this._onResize) { window.removeEventListener('resize', this._onResize); }
+        const c = this.canvas;
+        if (c) {
+            if (this._onWheel) c.removeEventListener('wheel', this._onWheel);
+            if (this._onPointerDown) c.removeEventListener('pointerdown', this._onPointerDown);
+            if (this._onPointerMove) c.removeEventListener('pointermove', this._onPointerMove);
+            if (this._onPointerUp) { c.removeEventListener('pointerup', this._onPointerUp); c.removeEventListener('pointercancel', this._onPointerUp); }
+            if (this._onDblClick) c.removeEventListener('dblclick', this._onDblClick);
+            if (this._onPointerLeave) c.removeEventListener('pointerleave', this._onPointerLeave);
+        }
     }
 }
 

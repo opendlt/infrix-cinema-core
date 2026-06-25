@@ -24,6 +24,9 @@ const SCRIPTS = [
   'narrativeSync.js',
   'layout.js',
   'cinemaStates.js',
+  'searchQuery.js',
+  'tooltip.js',
+  'a11y.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];

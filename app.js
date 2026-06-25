@@ -48,6 +48,9 @@
     const canvas = document.createElement('canvas');
     canvas.id = 'cinema-canvas';
     canvas.className = 'cinema-canvas';
+    canvas.setAttribute('role', 'application');
+    canvas.setAttribute('aria-roledescription', 'interactive scene graph');
+    canvas.setAttribute('aria-label', 'Infrix Cinema scene graph — hover to peek, click to pin, drag to pan');
     stage.appendChild(canvas);
 
     // Details panel (right).
@@ -86,8 +89,21 @@
     // ---- Details ----
     const details = new ns.DetailsPanel(detailsPanelEl, detailContent, detailClose);
     details.renderer = renderer;
-    renderer.on('nodeSelected', (n) => details.showNode(n));
-    renderer.on('edgeHovered', (t) => details.showTraffic(t));
+
+    // Hover tooltip (B1) + accessible node list (B5).
+    const tooltip = ns.CinemaTooltip ? new ns.CinemaTooltip(stage) : null;
+    const a11y = ns.CinemaA11y ? new ns.CinemaA11y(renderer, rootEl, {
+      onActivate: (id) => { const n = renderer._findNode ? renderer._findNode(id) : null; if (n) { renderer.selectedNode = id; details.showNode(n); } },
+    }) : null;
+
+    // Interaction model (B1): click pins details, hover peeks via tooltip, empty
+    // click clears. Edge hover no longer throws open the heavy panel.
+    renderer.on('nodeSelected', (n) => { details.showNode(n); if (tooltip) tooltip.hide(); if (a11y) a11y.focusNode(n.id); });
+    renderer.on('edgeSelected', (t) => { details.showTraffic(t); if (tooltip) tooltip.hide(); });
+    renderer.on('backgroundClicked', () => { details.hide(); renderer.setKeyboardFocus(null); });
+    renderer.on('nodeHovered', (p) => { if (tooltip) tooltip.showNode(p.node, p.x, p.y, renderer.getNodeStats ? renderer.getNodeStats(p.node.id) : null); });
+    renderer.on('edgeHovered', (p) => { if (tooltip) tooltip.showEdge(p.edge, p.x, p.y); });
+    renderer.on('hoverEnd', () => { if (tooltip) tooltip.hide(); });
 
     // ---- Legend ----
     const legend = new ns.CinemaLegend(stage);
@@ -142,9 +158,7 @@
     function clearFilter() {
       const search = rootEl.querySelector('#cinema-search');
       if (search) search.value = '';
-      filterActive = false;
-      applyFilter(renderer, '');
-      refreshOverlay();
+      runSearch('');
     }
     function openConnect() {
       const dlg = rootEl.querySelector('#connect-dialog');
@@ -185,6 +199,41 @@
       const f = evs.find((e) => e.status === 'failed') || evs[evs.length - 1];
       if (f) timeline.seek(f.sequence || 0);
     }
+
+    // ---- Power search (B4) ----
+    let matchedIds = [];
+    let matchIndex = -1;
+    let currentQuery = '';
+    function gasOf(n) { try { return renderer.getNodeStats(n.id).totalGas || 0; } catch (_) { return 0; } }
+    function runSearch(q) {
+      currentQuery = q || '';
+      const parsed = ns.parseSearchQuery ? ns.parseSearchQuery(currentQuery) : { isEmpty: !currentQuery.trim() };
+      filterActive = !parsed.isEmpty;
+      matchedIds = [];
+      const g = renderer.sceneGraph;
+      if (g) {
+        let nodes = g.nodes; if (!Array.isArray(nodes)) nodes = Object.values(nodes || {});
+        nodes.forEach((n) => {
+          if (n._origOpacity == null) n._origOpacity = (n.opacity != null ? n.opacity : 1);
+          const hit = parsed.isEmpty || (ns.matchSearch ? ns.matchSearch(n, parsed, { gasOf }) : true);
+          n.opacity = hit ? n._origOpacity : 0.12;
+          if (!parsed.isEmpty && hit) matchedIds.push(n.id);
+        });
+      }
+      matchIndex = -1;
+      if (controls) controls.setSearchCount(matchedIds.length, !parsed.isEmpty);
+      persistSearch(currentQuery);
+      refreshOverlay();
+    }
+    function stepMatch(dir) {
+      if (!matchedIds.length) return;
+      matchIndex = (matchIndex + dir + matchedIds.length) % matchedIds.length;
+      renderer.flyTo(matchedIds[matchIndex]);
+    }
+    function persistSearch(q) {
+      if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.search', q || ''); } catch (_) {} }
+    }
+    function readSearch() { try { return localStorage.getItem('cinema.search') || ''; } catch (_) { return ''; } }
 
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
@@ -256,11 +305,16 @@
           fit: () => renderer.fitToView(),
           resetView: () => renderer.resetView(),
           layout: (eng) => { layoutEngine = eng; persistLayout(eng); applyLayout(renderer.sceneGraph, { animate: true, fit: true }); },
-          filter: (q) => { filterActive = !!String(q || '').trim(); applyFilter(renderer, q); refreshOverlay(); },
+          filter: (q) => runSearch(q),
+          searchNext: () => stepMatch(1),
+          searchPrev: () => stepMatch(-1),
           toggleLegend: () => legend.toggle(),
           export: () => openExportMenu(exporter, rootEl),
         },
       });
+      // Restore a persisted query so a returning operator keeps their filter.
+      const q0 = readSearch();
+      if (q0) { controls.setSearchValue(q0); runSearch(q0); }
     }
 
     // ---- Scene wiring ----
@@ -271,6 +325,8 @@
         // Place any newcomers that arrived without coordinates, without
         // disturbing the rest (no animation/refit on incremental updates).
         if (ns.needsLayout && ns.needsLayout(renderer.sceneGraph)) applyLayout(renderer.sceneGraph, { animate: false });
+        if (a11y) a11y.setScene(renderer.sceneGraph);
+        if (filterActive) runSearch(currentQuery);
         refreshTransport();
         refreshOverlay();
         return;
@@ -281,6 +337,8 @@
       if (narrative) {
         try { narrative.setScene(g || {}, { proof: options.proof || (dataSource && dataSource.proof) || null }); } catch (e) {}
       }
+      if (a11y) a11y.setScene(renderer.sceneGraph);
+      if (filterActive) runSearch(currentQuery);
       refreshTransport();
       refreshOverlay();
     }
@@ -339,6 +397,8 @@
         if (controls && controls.destroy) controls.destroy();
         if (layoutController) layoutController.destroy();
         if (overlay) overlay.destroy();
+        if (tooltip) tooltip.destroy();
+        if (a11y) a11y.destroy();
         if (sync) sync.destroy();
         if (narrative) narrative.destroy();
         renderer.destroy();

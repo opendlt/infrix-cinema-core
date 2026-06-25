@@ -28,6 +28,8 @@
   display: block;
   width: 100%;
   height: 100%;
+  cursor: grab;
+  touch-action: none; /* B2 — own all touch gestures (pan/pinch) */
 }
 
 /* Details panel */
@@ -372,3 +374,56 @@
 }
 .cinema-state-action.hidden { display: none; }
 .cinema-state-action:focus-visible { outline: 2px solid var(--cinema-text); outline-offset: 2px; }
+
+/* ============================================================
+ * Tier B — hover tooltip (B1), power search (B4), a11y list (B5)
+ * ============================================================ */
+
+/* Hover tooltip — a lightweight peek card following the cursor. */
+.cinema-tooltip {
+  position: fixed; z-index: 20; pointer-events: none;
+  max-width: 260px; padding: 7px 10px;
+  background: color-mix(in srgb, var(--cinema-panel) 96%, transparent);
+  border: 1px solid var(--cinema-border); border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  font-size: 12px; color: var(--cinema-text); line-height: 1.4;
+}
+.cinema-tooltip.hidden { display: none; }
+.cinema-tooltip-title { font-weight: 700; }
+.cinema-tooltip-kind { color: var(--cinema-muted); font-size: 11px; text-transform: capitalize; }
+.cinema-tooltip-stat { color: var(--cinema-muted); font-family: var(--cinema-font-mono); font-size: 11px; margin-top: 2px; }
+.cinema-tooltip-note { color: var(--cinema-encrypted, #9e9e9e); font-size: 11px; margin-top: 2px; }
+.cinema-tooltip-chip {
+  display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  background: var(--cinema-panel-2); color: var(--cinema-muted);
+}
+.cinema-tooltip-chip[data-status="frozen"] { background: color-mix(in srgb, var(--cinema-frozen) 30%, transparent); color: #ffd9d4; }
+.cinema-tooltip-chip[data-status="paused"] { background: color-mix(in srgb, var(--cinema-paused) 30%, transparent); color: #ffe6cc; }
+.cinema-tooltip-chip[data-status="throttled"] { background: color-mix(in srgb, var(--cinema-throttled) 30%, transparent); color: #fff3cc; }
+.cinema-tooltip-chip[data-status="anomaly"] { background: color-mix(in srgb, var(--cinema-anomaly) 30%, transparent); color: #ffd9cc; }
+.cinema-tooltip-chip[data-status="private"] { background: var(--cinema-panel-2); color: var(--cinema-encrypted, #9e9e9e); }
+
+/* Power search — input + result count + ‹ › stepper. */
+.cinema-search-wrap { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 200px; min-width: 0; }
+.cinema-search-wrap .cinema-search { flex: 1 1 auto; }
+.cinema-search-count { font-size: 11px; color: var(--cinema-muted); white-space: nowrap; }
+.cinema-search-count.hidden { display: none; }
+.cinema-search-nav { display: inline-flex; gap: 2px; }
+.cinema-search-nav.hidden { display: none; }
+.cinema-search-navbtn { padding: 2px 8px; font-size: 14px; line-height: 1; }
+
+/* Visually-hidden but focusable accessible node list (B5). */
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* When the list receives focus, surface it so sighted keyboard users see it too. */
+.cinema-a11y-list:focus-within, .cinema-a11y-list:focus {
+  position: absolute !important; width: 240px; height: auto; max-height: 50%;
+  clip: auto; margin: 0; left: 10px; bottom: 56px; z-index: 9; overflow-y: auto;
+  background: var(--cinema-panel); border: 1px solid var(--cinema-accent);
+  border-radius: var(--cinema-radius); padding: 6px; white-space: normal;
+}
+.cinema-a11y-option { padding: 4px 8px; font-size: 12px; border-radius: 5px; color: var(--cinema-text); }
+.cinema-a11y-option[aria-selected="true"] { background: var(--cinema-accent); color: var(--cinema-accent-text); }

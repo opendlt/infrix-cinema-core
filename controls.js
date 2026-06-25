@@ -135,14 +135,40 @@
         }
         bar.appendChild(layoutGroup);
 
+        // Power search (B4): kind:/status:/gas: grammar + result count + stepper.
+        const sWrap = document.createElement('div');
+        sWrap.className = 'cinema-search-wrap';
         const search = document.createElement('input');
         search.type = 'search';
         search.id = 'cinema-search';
         search.className = 'cinema-search';
-        search.placeholder = 'Filter nodes…';
-        search.setAttribute('aria-label', 'Filter nodes by label or kind');
+        search.placeholder = 'Filter  (try kind:contract, status:frozen, gas:>1000)';
+        search.setAttribute('aria-label', 'Filter nodes — supports kind:, status:, gas: and free text');
         search.addEventListener('input', () => this.fire('filter', search.value));
-        bar.appendChild(search);
+        search.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); this.fire(e.shiftKey ? 'searchPrev' : 'searchNext'); }
+          else if (e.key === 'Escape') { e.preventDefault(); search.value = ''; this.fire('filter', ''); }
+        });
+        this.searchEl = search;
+        sWrap.appendChild(search);
+
+        const count = document.createElement('span');
+        count.className = 'cinema-search-count hidden';
+        count.id = 'cinema-search-count';
+        count.setAttribute('aria-live', 'polite');
+        sWrap.appendChild(count);
+        this.searchCountEl = count;
+
+        const nav = document.createElement('span');
+        nav.className = 'cinema-search-nav hidden';
+        const prev = this.btn('cinema-search-prev', '‹', 'Previous match (Shift+Enter)', () => this.fire('searchPrev'));
+        const next = this.btn('cinema-search-next', '›', 'Next match (Enter)', () => this.fire('searchNext'));
+        prev.classList.add('cinema-search-navbtn'); next.classList.add('cinema-search-navbtn');
+        nav.appendChild(prev); nav.appendChild(next);
+        sWrap.appendChild(nav);
+        this.searchNavEl = nav;
+
+        bar.appendChild(sWrap);
       }
 
       bar.appendChild(this.btn('cinema-btn-legend', 'Legend', 'Toggle legend', () => this.fire('toggleLegend')));
@@ -245,6 +271,22 @@
         this.ticksEl.appendChild(tick);
       }
     }
+
+    /** setSearchCount shows the result tally + stepper while a query is active. */
+    setSearchCount(matched, hasQuery) {
+      if (!this.searchCountEl) return;
+      if (!hasQuery) {
+        this.searchCountEl.classList.add('hidden');
+        if (this.searchNavEl) this.searchNavEl.classList.add('hidden');
+        return;
+      }
+      this.searchCountEl.textContent = matched + (matched === 1 ? ' match' : ' matches');
+      this.searchCountEl.classList.remove('hidden');
+      if (this.searchNavEl) this.searchNavEl.classList.toggle('hidden', !matched);
+    }
+
+    /** setSearchValue restores a persisted query into the box (no event fired). */
+    setSearchValue(v) { if (this.searchEl) this.searchEl.value = v || ''; }
 
     fire(name, arg) { const h = this.handlers[name]; if (h) h(arg); }
 
