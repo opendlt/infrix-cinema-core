@@ -18,6 +18,7 @@ const SCRIPTS = [
   'timelineAdapter.js',
   'legend.js',
   'exportPanel.js',
+  'trustLadder.js',
   'proofPanel.js',
   'narrativeTemplates.js',
   'narrativePanel.js',
@@ -27,6 +28,7 @@ const SCRIPTS = [
   'searchQuery.js',
   'tooltip.js',
   'a11y.js',
+  'agentRibbon.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];

@@ -62,6 +62,8 @@ class CinemaRenderer {
         // Keyboard focus ring target (B5) + camera animation handle (B1/B4).
         this._focusedNode = null;
         this._camRaf = null;
+        // Anchor-confirmation moment (D3): {evId, anId, start} while playing.
+        this._anchorMoment = null;
 
         this.resizeCanvas();
         this._onResize = () => this.resizeCanvas();
@@ -262,6 +264,9 @@ class CinemaRenderer {
         if (this.sceneGraph) {
             this.drawGraph(this.sceneGraph, false);
         }
+
+        // Anchor-confirmation moment (D3) draws in world space, above the graph.
+        if (this._anchorMoment) this._drawAnchorMoment();
 
         ctx.restore();
 
@@ -556,13 +561,40 @@ class CinemaRenderer {
                 ctx.setLineDash([]);
             }
 
-            // Lock glyph for redacted/encrypted (disclosure-aware) nodes
+            // Sealed (disclosure-redacted) treatment (C2): a deliberate frosted
+            // look — a sweeping shimmer + a dashed seal ring + a centered lock —
+            // NOT a bare emoji. Fixed size/opacity are already enforced upstream
+            // so this never leaks the hidden value's magnitude. A node that is
+            // disclosable via a held grant gets an "unlockable" accent ring.
             if ((node.redacted || node.zkIndicator) && !isGhost) {
-                ctx.fillStyle = `rgba(230,230,240,${entryAlpha})`;
-                ctx.font = `${Math.max(10, radius)}px sans-serif`;
+                const disclosable = !!node.grantId;
+                // frosted overlay disc
+                ctx.beginPath();
+                ctx.arc(nx, ny, radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(220,224,236,${0.10 * entryAlpha})`;
+                ctx.fill();
+                // shimmer sweep
+                const sweep = (this.particlePhase * 0.6) % (Math.PI * 2);
+                ctx.beginPath();
+                ctx.arc(nx, ny, radius, sweep, sweep + 0.6);
+                ctx.strokeStyle = `rgba(235,238,248,${0.5 * entryAlpha})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // dashed seal ring
+                ctx.beginPath();
+                ctx.arc(nx, ny, radius + 4, 0, Math.PI * 2);
+                ctx.strokeStyle = disclosable ? `rgba(92,212,228,${0.9 * entryAlpha})` : `rgba(158,158,158,${0.8 * entryAlpha})`;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 3]);
+                ctx.lineDashOffset = -this.particlePhase * 10;
+                ctx.stroke();
+                ctx.setLineDash([]);
+                // centered lock glyph
+                ctx.fillStyle = `rgba(235,238,248,${entryAlpha})`;
+                ctx.font = `${Math.max(9, radius * 0.8)}px sans-serif`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText('\u{1F512}', nx, ny); // 🔒
+                ctx.fillText('\u{1F512}', nx, ny);
                 ctx.textBaseline = 'alphabetic';
             }
 
@@ -865,6 +897,44 @@ class CinemaRenderer {
         const z = Math.min((this.cssWidth * 0.8) / w, (this.cssHeight * 0.8) / h, 3);
         const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
         this._animateCamera({ x: -cx * z, y: -cy * z, zoom: z }, 420);
+    }
+
+    // playAnchorConfirmation kicks off the one-time ~800ms "it's now independently
+    // verifiable" beat (D3): a beam from the evidence node to the L0 anchor + a
+    // crystallize ring. Reduced-motion → no-op (the trust state is still legible).
+    playAnchorConfirmation(evidenceId, anchorId) {
+        if (rendererReducedMotion()) return;
+        if (!this._findNode(evidenceId) || !this._findNode(anchorId)) return;
+        this._anchorMoment = { evId: evidenceId, anId: anchorId, start: performance.now() };
+    }
+
+    _drawAnchorMoment() {
+        const m = this._anchorMoment;
+        const t = (performance.now() - m.start) / 800;
+        if (t >= 1) { this._anchorMoment = null; return; }
+        const ev = this._findNode(m.evId), an = this._findNode(m.anId);
+        if (!ev || !an || !ev.position || !an.position) { this._anchorMoment = null; return; }
+        const ctx = this.ctx;
+        const k = easeInOutRenderer(Math.min(1, t));
+        const bx = ev.position.x + (an.position.x - ev.position.x) * k;
+        const by = ev.position.y + (an.position.y - ev.position.y) * k;
+        ctx.save();
+        // beam
+        ctx.strokeStyle = `rgba(255,215,0,${0.85 * (1 - t) + 0.15})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(ev.position.x, ev.position.y); ctx.lineTo(bx, by); ctx.stroke();
+        // leading spark
+        ctx.beginPath(); ctx.arc(bx, by, 4 + 3 * Math.sin(this.particlePhase * 6), 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,236,150,0.95)'; ctx.fill();
+        // crystallize ring at the anchor once the beam arrives
+        if (k > 0.6) {
+            const rt = (k - 0.6) / 0.4;
+            const rr = 10 + rt * 44;
+            ctx.strokeStyle = `rgba(255,215,0,${(1 - rt) * 0.9})`;
+            ctx.lineWidth = 2 + (1 - rt) * 3;
+            ctx.beginPath(); ctx.arc(an.position.x, an.position.y, rr, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
     }
 
     setKeyboardFocus(id) {

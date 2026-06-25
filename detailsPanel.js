@@ -28,11 +28,21 @@
         ['URL', node.url || '—'],
         ['Label', node.label || '—'],
       ]));
+      // Per-node assurance chip (C1) — only when a governing event backs it.
+      const asr = (typeof this.assuranceProvider === 'function') ? this.assuranceProvider(node.id) : null;
+      if (asr && asr.id) {
+        const sec = section('Assurance', [['Backed to', asr.label || asr.id]]);
+        const chip = sec.querySelector('.cinema-detail-val');
+        if (chip) { chip.classList.add('cinema-assurance-chip'); chip.dataset.assurance = asr.id; }
+        rows.push(sec);
+      }
       if (node.redacted) {
-        rows.push(section('Disclosure', [
-          ['Visibility', 'private (redacted)'],
-          ['Value', '🔒 ' + (node.label || '[encrypted]')],
-        ]));
+        // Disclosure as a first-class object (C2): say what's PROVABLE without
+        // leaking the value, and surface any grant that could reveal it.
+        const drows = [['Visibility', 'private — provably hidden']];
+        if (node.grantId) drows.push(['Disclosable via', node.grantId]);
+        rows.push(section('Disclosure', drows));
+        rows.push(noteEl('This redaction did not change the proven outcome — Cinema shows that the field participated, never its value or magnitude.'));
       } else {
         if (stats.activity > 0) rows.push(section('Activity', [
           ['Inbound calls', String(stats.inbound)],
@@ -89,6 +99,15 @@
       row.appendChild(ke); row.appendChild(ve);
       wrap.appendChild(row);
     }
+    return wrap;
+  }
+  function noteEl(text) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cinema-detail-section';
+    const p = document.createElement('p');
+    p.className = 'cinema-detail-note';
+    p.textContent = text;
+    wrap.appendChild(p);
     return wrap;
   }
   function kindLabel(kind) { return String(kind || 'node').replace(/_/g, ' '); }

@@ -427,3 +427,92 @@
 }
 .cinema-a11y-option { padding: 4px 8px; font-size: 12px; border-radius: 5px; color: var(--cinema-text); }
 .cinema-a11y-option[aria-selected="true"] { background: var(--cinema-accent); color: var(--cinema-accent-text); }
+
+/* ============================================================
+ * Tier C — Trust Ladder (C1), disclosure (C2), agent ribbon (C3)
+ * ============================================================ */
+
+/* Trust Ladder — the hero assurance display (shared proof + narrative). */
+.cinema-trust-ladder { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; }
+.cinema-trust-ladder.compact { gap: 4px; margin-bottom: 8px; }
+.cinema-trust-head { font-size: 12px; font-weight: 800; color: var(--cinema-text); }
+.cinema-trust-head[data-assurance="l0"] { color: var(--cinema-anchor); }
+.cinema-trust-head[data-assurance="witness"] { color: var(--cinema-proof-ok); }
+.cinema-trust-head[data-assurance="replay"] { color: var(--cinema-accent); }
+.cinema-trust-head[data-assurance="offline"] { color: var(--cinema-muted); }
+.cinema-trust-track { display: flex; align-items: center; gap: 0; }
+.cinema-trust-link { flex: 1 1 auto; height: 2px; background: var(--cinema-border); }
+.cinema-trust-link.backed { background: var(--cinema-accent); }
+.cinema-trust-rung {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: none; cursor: pointer; padding: 2px 4px; color: var(--cinema-muted);
+}
+.cinema-trust-rung:focus-visible { outline: 2px solid var(--cinema-accent); outline-offset: 1px; border-radius: 5px; }
+.cinema-trust-dot {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px dashed var(--cinema-border); background: transparent;
+}
+.cinema-trust-rung.backed .cinema-trust-dot { border-style: solid; border-color: var(--cinema-accent); background: var(--cinema-accent); }
+.cinema-trust-rung.ceiling .cinema-trust-dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--cinema-accent) 35%, transparent); }
+.cinema-trust-rung[data-assurance="l0"].ceiling .cinema-trust-dot,
+.cinema-trust-rung[data-assurance="l0"].backed .cinema-trust-dot { border-color: var(--cinema-anchor); background: var(--cinema-anchor); }
+.cinema-trust-rung[data-assurance="witness"].backed .cinema-trust-dot { border-color: var(--cinema-proof-ok); background: var(--cinema-proof-ok); }
+.cinema-trust-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.cinema-trust-rung.backed .cinema-trust-label { color: var(--cinema-text); }
+@keyframes cinema-trust-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinema-anchor) 70%, transparent); }
+  100% { box-shadow: 0 0 0 16px transparent; }
+}
+.cinema-trust-rung.pulse .cinema-trust-dot { animation: cinema-trust-pulse 800ms ease-out 1; }
+
+/* Per-node assurance chip (details + tooltip). */
+.cinema-assurance-chip { padding: 1px 7px; border-radius: 999px; background: var(--cinema-panel-2); font-weight: 700; }
+.cinema-assurance-chip[data-assurance="l0"] { color: var(--cinema-anchor); }
+.cinema-assurance-chip[data-assurance="witness"] { color: var(--cinema-proof-ok); }
+.cinema-assurance-chip[data-assurance="replay"] { color: var(--cinema-accent); }
+.cinema-tooltip-asr { margin-top: 3px; font-size: 10px; font-weight: 700; color: var(--cinema-accent); text-transform: uppercase; letter-spacing: 0.03em; }
+.cinema-tooltip-asr[data-status="l0"] { color: var(--cinema-anchor); }
+.cinema-tooltip-asr[data-status="witness"] { color: var(--cinema-proof-ok); }
+
+/* Disclosure (C2): detail note + scene summary chip. */
+.cinema-detail-note { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--cinema-muted); }
+.cinema-disclosure-chip {
+  position: absolute; top: 8px; right: 10px; z-index: 6;
+  padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: color-mix(in srgb, var(--cinema-panel) 90%, transparent);
+  border: 1px solid var(--cinema-disclosure, #ffd700); color: var(--cinema-text);
+}
+.cinema-disclosure-chip.hidden { display: none; }
+
+/* Narrative "what this proves" line (C4). */
+.cinema-narrative-proves { font-size: 0.72rem; color: var(--cinema-accent, #6f6bff); line-height: 1.35; opacity: 0.92; }
+
+/* Agent-stop ribbon (C3): a horizontal stepper terminating in a barrier. */
+.cinema-agent-ribbon {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 8; width: min(720px, 92%); padding: 18px 20px;
+  background: color-mix(in srgb, var(--cinema-panel) 96%, transparent);
+  border: 1px solid var(--cinema-border); border-radius: var(--cinema-radius);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+.cinema-agent-ribbon.hidden { display: none; }
+.cinema-agent-head { font-size: 14px; font-weight: 800; margin-bottom: 12px; }
+.cinema-agent-head[data-ok="1"] { color: var(--cinema-proof-ok); }
+.cinema-agent-head[data-ok="0"] { color: var(--cinema-frozen); }
+.cinema-agent-steps { display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px; }
+.cinema-agent-conn { align-self: center; color: var(--cinema-muted); }
+.cinema-agent-step {
+  flex: 1 1 0; min-width: 96px; padding: 9px 10px; border-radius: 7px; font-size: 12px; font-weight: 600;
+  background: var(--cinema-panel-2); border: 1px solid var(--cinema-border); color: var(--cinema-text); text-align: center;
+}
+.cinema-agent-step[data-tone="ok"] { border-color: color-mix(in srgb, var(--cinema-proof-ok) 60%, transparent); }
+.cinema-agent-step[data-tone="warn"] { border-color: color-mix(in srgb, var(--cinema-throttled) 60%, transparent); }
+.cinema-agent-step[data-tone="info"] { border-color: color-mix(in srgb, var(--cinema-accent) 50%, transparent); }
+.cinema-agent-step.barrier {
+  background: color-mix(in srgb, var(--cinema-frozen) 22%, var(--cinema-panel-2));
+  border: 2px solid var(--cinema-frozen); color: #ffe2dd; font-weight: 800;
+  position: relative;
+}
+.cinema-agent-step.barrier::before { content: '⛔ '; }
+.cinema-agent-why { margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--cinema-text); }
+.cinema-agent-actions { margin-top: 14px; display: flex; justify-content: flex-end; }

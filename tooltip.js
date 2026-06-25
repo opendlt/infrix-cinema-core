@@ -38,13 +38,17 @@
       }
     }
 
-    showNode(node, x, y, stats) {
+    showNode(node, x, y, opts) {
       if (!node) return;
+      opts = opts || {};
+      const stats = opts.stats || null;
+      const assurance = opts.assurance || null;
       const status = ns.nodeStatus ? ns.nodeStatus(node) : '';
       const rows = [
         { cls: 'title', text: node.label || '[node]' },
         { cls: 'kind', text: kindLabel(node.kind) },
         status && status !== 'normal' ? { cls: 'chip', text: status, status } : null,
+        assurance && assurance.id ? { cls: 'asr', text: 'backed to ' + (assurance.label || assurance.id), status: assurance.id } : null,
       ];
       if (node.redacted) {
         rows.push({ cls: 'note', text: '🔒 Provably sealed — value hidden' });

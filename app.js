@@ -89,6 +89,7 @@
     // ---- Details ----
     const details = new ns.DetailsPanel(detailsPanelEl, detailContent, detailClose);
     details.renderer = renderer;
+    details.assuranceProvider = (id) => nodeAssurance[id] || null;
 
     // Hover tooltip (B1) + accessible node list (B5).
     const tooltip = ns.CinemaTooltip ? new ns.CinemaTooltip(stage) : null;
@@ -101,7 +102,7 @@
     renderer.on('nodeSelected', (n) => { details.showNode(n); if (tooltip) tooltip.hide(); if (a11y) a11y.focusNode(n.id); });
     renderer.on('edgeSelected', (t) => { details.showTraffic(t); if (tooltip) tooltip.hide(); });
     renderer.on('backgroundClicked', () => { details.hide(); renderer.setKeyboardFocus(null); });
-    renderer.on('nodeHovered', (p) => { if (tooltip) tooltip.showNode(p.node, p.x, p.y, renderer.getNodeStats ? renderer.getNodeStats(p.node.id) : null); });
+    renderer.on('nodeHovered', (p) => { if (tooltip) tooltip.showNode(p.node, p.x, p.y, { stats: renderer.getNodeStats ? renderer.getNodeStats(p.node.id) : null, assurance: nodeAssurance[p.node.id] || null }); });
     renderer.on('edgeHovered', (p) => { if (tooltip) tooltip.showEdge(p.edge, p.x, p.y); });
     renderer.on('hoverEnd', () => { if (tooltip) tooltip.hide(); });
 
@@ -235,6 +236,75 @@
     }
     function readSearch() { try { return localStorage.getItem('cinema.search') || ''; } catch (_) { return ''; } }
 
+    // ---- Tier C: trust ladder + disclosure + agent ribbon + anchor moment ----
+    const ASR_ORDER = ns.ASSURANCE_ORDER || ['offline', 'replay', 'l0', 'witness'];
+    function rankAsr(id) { const i = ASR_ORDER.indexOf(id); return i < 0 ? 0 : i; }
+    function asrLabel(id) { const A = ns.ASSURANCE || {}; const a = Object.values(A).find((x) => x.id === id); return (a && a.label) || id; }
+
+    let nodeAssurance = {};
+    function buildNodeAssurance() {
+      nodeAssurance = {};
+      for (const e of getEvents()) {
+        for (const id of (e.graphNodeIds || [])) {
+          const cur = nodeAssurance[id];
+          if (!cur || rankAsr(e.assurance) > rankAsr(cur.id)) nodeAssurance[id] = { id: e.assurance, label: asrLabel(e.assurance) };
+        }
+      }
+    }
+
+    // Rung click → highlight the nodes that rung is about (reuses sync highlight).
+    function nodesForRung(rungId) {
+      const g = renderer.sceneGraph; if (!g) return [];
+      let nodes = g.nodes; if (!Array.isArray(nodes)) nodes = Object.values(nodes || {});
+      if (rungId === 'l0') return nodes.filter((n) => n.kind === 'anchor' || n.kind === 'l0_bridge').map((n) => n.id);
+      if (rungId === 'witness') return nodes.filter((n) => n.kind === 'evidence' || n.kind === 'evidence_link').map((n) => n.id);
+      if (rungId === 'replay') return nodes.map((n) => n.id);
+      return [];
+    }
+    function highlightRung(rungId) {
+      if (!sync || !sync.highlightNodes) return;
+      const ids = nodesForRung(rungId);
+      if (ids.length) sync.highlightNodes(ids); else sync.clearHighlight();
+    }
+
+    // Scene-level disclosure summary chip (C2).
+    const discChip = el('div', 'cinema-disclosure-chip hidden');
+    discChip.id = 'cinema-disclosure-chip';
+    stage.appendChild(discChip);
+    function updateDisclosureChip() {
+      const g = renderer.sceneGraph;
+      let nodes = g ? (Array.isArray(g.nodes) ? g.nodes : Object.values(g.nodes || {})) : [];
+      const sealed = nodes.filter((n) => n.redacted).length;
+      const disclosable = nodes.filter((n) => n.redacted && n.grantId).length;
+      if (sealed > 0) {
+        discChip.textContent = `🔒 ${sealed} sealed` + (disclosable ? ` · ${disclosable} disclosable to you` : '');
+        discChip.classList.remove('hidden');
+      } else { discChip.classList.add('hidden'); }
+    }
+
+    // Agent-stop ribbon (C3) — shown only for agent-receipt scenes.
+    const agentRibbon = ns.AgentRibbon ? new ns.AgentRibbon(stage, { onExport: () => { try { exporter.exportJSON(); } catch (_) {} } }) : null;
+
+    // Anchor-confirmation moment (D3).
+    let anchorFired = false;
+    function pulseLadders(rung) {
+      if (proofPanel && proofPanel.ladder && proofPanel.ladder.pulse) proofPanel.ladder.pulse(rung);
+      if (narrative && narrative.ladder && narrative.ladder.pulse) narrative.ladder.pulse(rung);
+    }
+    function maybeAnchorMoment(seq) {
+      if (anchorFired) return;
+      const proof = options.proof || (dataSource && dataSource.proof) || null;
+      const anchored = ns.ladderProofFacts ? ns.ladderProofFacts(proof || {}).anchored : false;
+      if (!anchored) return;
+      const anchorEv = getEvents().find((e) => e.stage === 'anchor');
+      if (!anchorEv || seq < (anchorEv.sequence || 0)) return;
+      const g = renderer.sceneGraph;
+      let nodes = g ? (Array.isArray(g.nodes) ? g.nodes : Object.values(g.nodes || {})) : [];
+      const ev = nodes.find((n) => n.kind === 'evidence' || n.kind === 'evidence_link');
+      const an = nodes.find((n) => n.kind === 'anchor' || n.kind === 'l0_bridge');
+      if (ev && an) { renderer.playAnchorConfirmation(ev.id, an.id); pulseLadders('l0'); anchorFired = true; }
+    }
+
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
       if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
@@ -249,7 +319,9 @@
     const narrative = ns.NarrativePanel
       ? new ns.NarrativePanel(body, {
           proof: proofForNarrative,
+          headlines: options.narrativeHeadlines,
           onCardFocus: (ids) => { if (sync) sync.highlightNodes(ids); },
+          onRungClick: (rungId) => highlightRung(rungId),
         })
       : null;
     if (narrative && ns.createNarrativeSync) sync = ns.createNarrativeSync({ renderer, panel: narrative });
@@ -271,6 +343,7 @@
           const g = renderer.sceneGraph;
           controls.setPosition(pos, timeline.state.totalSeq || 0, (g && (g.blockHeight || g.BlockHeight)) || 0);
         }
+        maybeAnchorMoment(pos); // D3 — fire when the head reaches the anchor stage
       },
     });
     const exporter = new ns.CinemaExport({ renderer, dataSource, mode, commit: options.commit, disclosureContext, timeline });
@@ -279,7 +352,7 @@
     let proofPanel = null;
     if (caps.proof) {
       const proof = options.proof || (dataSource && dataSource.proof) || {};
-      proofPanel = new ns.ProofPanel(rootEl, proof, { disclosureContext });
+      proofPanel = new ns.ProofPanel(rootEl, proof, { disclosureContext, onRungClick: (rungId) => highlightRung(rungId) });
       // adoption-06 — mount the SAME proof-receipt component Nexus uses, so
       // Cinema proof mode answers the trust question identically. The receipt
       // is offline (the viewer did not confirm L0 live), so it caps at L3.
@@ -327,6 +400,9 @@
         if (ns.needsLayout && ns.needsLayout(renderer.sceneGraph)) applyLayout(renderer.sceneGraph, { animate: false });
         if (a11y) a11y.setScene(renderer.sceneGraph);
         if (filterActive) runSearch(currentQuery);
+        buildNodeAssurance();
+        updateDisclosureChip();
+        if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);
         refreshTransport();
         refreshOverlay();
         return;
@@ -339,6 +415,13 @@
       }
       if (a11y) a11y.setScene(renderer.sceneGraph);
       if (filterActive) runSearch(currentQuery);
+      buildNodeAssurance();
+      updateDisclosureChip();
+      if (agentRibbon) agentRibbon.setScene(renderer.sceneGraph);
+      // A fresh scene re-arms the one-time anchor-confirmation moment (D3); in
+      // proof mode (no live scrubbing) play it once on open.
+      anchorFired = false;
+      if (mode === 'cinema.proof') maybeAnchorMoment(Number.MAX_SAFE_INTEGER);
       refreshTransport();
       refreshOverlay();
     }
@@ -399,6 +482,7 @@
         if (overlay) overlay.destroy();
         if (tooltip) tooltip.destroy();
         if (a11y) a11y.destroy();
+        if (agentRibbon) agentRibbon.destroy();
         if (sync) sync.destroy();
         if (narrative) narrative.destroy();
         renderer.destroy();
