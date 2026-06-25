@@ -703,6 +703,49 @@
 .cinema-dial-chip.active { background: var(--cinema-disclosure, #ffd700); color: var(--cinema-accent-text); border-color: transparent; }
 
 /* ============================================================
+ * Wave J — vitals (J1), minimap/clusters (J2), timeline instrument (J3),
+ *          projections (J4)
+ * ============================================================ */
+
+/* J1 — vitals strip (replaces the raw status footer). */
+.cinema-vitals { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; }
+.cinema-vital {
+  font-size: var(--cinema-fs-xs, 11px); padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  background: var(--cinema-panel-2); color: var(--cinema-muted); border: 1px solid transparent;
+}
+button.cinema-vital { cursor: pointer; }
+button.cinema-vital:hover { border-color: var(--cinema-border); }
+.cinema-vital.v-rate { font-family: var(--cinema-font-mono); }
+.cinema-vital.v-throttled { color: var(--cinema-throttled); }
+.cinema-vital.v-paused { color: var(--cinema-paused); }
+.cinema-vital.v-frozen { color: #fff; background: var(--cinema-frozen); }
+.cinema-vital.v-alert { color: #fff; background: var(--cinema-anomaly, #ff5722); }
+.cinema-vital.v-trust[data-assurance="l0"] { color: var(--cinema-anchor); }
+.cinema-vital.v-trust[data-assurance="witness"] { color: var(--cinema-proof-ok); }
+.cinema-vital.v-trust[data-assurance="replay"] { color: var(--cinema-accent); }
+
+/* J2 — minimap. */
+.cinema-minimap {
+  position: absolute; right: 10px; bottom: 10px; z-index: 6;
+  border: 1px solid var(--cinema-border); border-radius: 6px; box-shadow: var(--cinema-shadow-2); cursor: crosshair;
+}
+
+/* J3 — timeline instrument (sits above the scrubber). */
+.cinema-tl-instrument { position: absolute; left: 8px; right: 8px; bottom: 100%; height: 22px; pointer-events: none; }
+.cinema-tl-density { position: absolute; inset: 0 0 8px 0; display: flex; align-items: flex-end; gap: 1px; }
+.cinema-tl-bar { flex: 1 1 0; background: color-mix(in srgb, var(--cinema-accent) 45%, transparent); min-height: 1px; border-radius: 1px 1px 0 0; }
+.cinema-tl-trust { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; border-radius: 2px; overflow: hidden; background: var(--cinema-panel-2); }
+.cinema-tl-seg { position: absolute; top: 0; bottom: 0; }
+.cinema-scrubber-wrap { position: relative; }
+
+/* J4 — projection toggle + canvas overlay. */
+.cinema-proj-toggle { display: inline-flex; border: 1px solid var(--cinema-border); border-radius: 6px; overflow: hidden; }
+.cinema-proj-btn { font-size: 11px; font-weight: 600; padding: 4px 8px; border: none; background: transparent; color: var(--cinema-muted); cursor: pointer; }
+.cinema-proj-btn.active { background: var(--cinema-accent); color: var(--cinema-accent-text); }
+.cinema-projection { position: absolute; inset: 0; z-index: 5; }
+.cinema-projection.hidden { display: none; }
+
+/* ============================================================
  * Tier D — elevation, motion polish, reduced-motion (D1 + D2)
  * ============================================================ */
 

@@ -135,6 +135,28 @@
         }
         bar.appendChild(layoutGroup);
 
+        // Alternative projections (J4) — Graph / Flow / Matrix.
+        const projGroup = document.createElement('div');
+        projGroup.className = 'cinema-proj-toggle';
+        projGroup.setAttribute('role', 'group');
+        projGroup.setAttribute('aria-label', 'Projection');
+        this._projBtns = [];
+        for (const [pmode, label] of [['graph', 'Graph'], ['sankey', 'Flow'], ['matrix', 'Matrix']]) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'cinema-proj-btn' + (pmode === 'graph' ? ' active' : '');
+          b.dataset.proj = pmode;
+          b.textContent = label;
+          b.setAttribute('aria-pressed', pmode === 'graph' ? 'true' : 'false');
+          b.addEventListener('click', () => {
+            for (const x of this._projBtns) { const on = x.dataset.proj === pmode; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+            this.fire('projection', pmode);
+          });
+          this._projBtns.push(b);
+          projGroup.appendChild(b);
+        }
+        bar.appendChild(projGroup);
+
         // Power search (B4): kind:/status:/gas: grammar + result count + stepper.
         const sWrap = document.createElement('div');
         sWrap.className = 'cinema-search-wrap';

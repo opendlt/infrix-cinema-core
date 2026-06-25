@@ -34,6 +34,11 @@ const SCRIPTS = [
   'verify.js',
   'provenance.js',
   'drift.js',
+  'vitals.js',
+  'cluster.js',
+  'minimap.js',
+  'timelineInstrument.js',
+  'projections.js',
   'app.js',
 ];
 const STYLES = ['cinemaTokens.css', 'styles.css'];

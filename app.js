@@ -74,13 +74,18 @@
     const controlsHost = el('div', 'cinema-controls-host');
     if (!caps.readOnly) rootEl.appendChild(controlsHost);
 
-    // Status bar.
+    // Status bar — the vitals strip (J1) replaces raw telemetry with posture.
     const status = el('footer', 'cinema-status');
     status.id = 'status-bar';
-    status.append(
-      span('status-block', 'Block: 0'), span('status-gas', 'Gas: 0'),
-      span('status-nodes', 'Nodes: 0'), span('status-edges', 'Edges: 0'),
-    );
+    let vitalsStrip = null;
+    if (ns.VitalsStrip) {
+      vitalsStrip = new ns.VitalsStrip(status, { onJump: (t) => vitalsJump(t) });
+    } else {
+      status.append(
+        span('status-block', 'Block: 0'), span('status-gas', 'Gas: 0'),
+        span('status-nodes', 'Nodes: 0'), span('status-edges', 'Edges: 0'),
+      );
+    }
     if (!caps.readOnly) rootEl.appendChild(status);
 
     // ---- Renderer ----
@@ -186,7 +191,9 @@
       const block = g ? (g.blockHeight || g.BlockHeight || 0) : 0;
       controls.setTicks(evs);
       controls.setPosition(timeline.state.currentSeq || 0, timeline.state.totalSeq || 0, block);
+      if (tlInstrument) tlInstrument.render(evs, Math.max(timeline.state.totalSeq || 0, lastSeqOf(evs)));
     }
+    function lastSeqOf(evs) { return evs.length ? (evs[evs.length - 1].sequence != null ? evs[evs.length - 1].sequence : evs.length - 1) : 1; }
 
     function stepEvent(dir) {
       const evs = getEvents().map((e) => e.sequence || 0).sort((a, b) => a - b);
@@ -492,6 +499,35 @@
       disclosureDial.classList.remove('hidden');
     }
 
+    // ---- Wave J: vitals (J1), clustering (J2), timeline instrument (J3), projections (J4) ----
+    const vitalsHistory = [];
+    function updateVitals() {
+      if (!vitalsStrip || !ns.computeVitals) return;
+      const g = renderer.sceneGraph || {};
+      const base = ns.computeVitals(g, []);
+      vitalsHistory.push({ t: Date.now(), gas: base.totalGas, edges: base.edges });
+      if (vitalsHistory.length > 30) vitalsHistory.shift();
+      vitalsStrip.setVitals(ns.computeVitals(g, vitalsHistory), sceneCeiling());
+    }
+    function vitalsJump(target) {
+      let nodes = renderer.sceneGraph ? (Array.isArray(renderer.sceneGraph.nodes) ? renderer.sceneGraph.nodes : Object.values(renderer.sceneGraph.nodes || {})) : [];
+      let ids = [];
+      const t = String(target);
+      if (t.indexOf('breaker:') === 0) { const st = t.split(':')[1]; ids = nodes.filter((n) => n.breakerState === st).map((n) => n.id); }
+      else if (t === 'anomaly') ids = nodes.filter((n) => n.anomalyScore > 0 || n.breakerState === 'frozen').map((n) => n.id);
+      else if (t === 'sealed') ids = nodes.filter((n) => n.redacted).map((n) => n.id);
+      else if (t === 'trust') { const c = sceneCeiling(); pulseLadders(c === 'offline' ? 'replay' : c); return; }
+      if (ids.length && renderer.fitToNodes) renderer.fitToNodes(ids);
+    }
+    function updateClusters() {
+      if (ns.clusterScene && renderer.setClusters) renderer.setClusters(ns.clusterScene(renderer.sceneGraph, { by: 'family' }));
+    }
+    let projMode = 'graph';
+    function setProjection(m) {
+      projMode = m;
+      if (projectionView) projectionView.setMode(m === 'graph' ? null : m, renderer.sceneGraph);
+    }
+
     function readLayout() { try { return localStorage.getItem('cinema.layout'); } catch (_) { return null; } }
     function persistLayout(m) {
       if (mode === 'cinema.full' || mode === 'cinema.nexus') { try { localStorage.setItem('cinema.layout', m); } catch (_) {} }
@@ -574,6 +610,7 @@
           playStory: () => { if (cinematic) cinematic.togglePlay(); },
           verify: () => openVerifyTheatre(),
           toggleDrift: () => toggleDrift(),
+          projection: (m) => setProjection(m),
         },
       });
       // Restore a persisted query so a returning operator keeps their filter.
@@ -601,6 +638,15 @@
       else if (e.key === 'ArrowLeft') { cinematic.prev(); e.stopPropagation(); e.preventDefault(); }
     };
     document.addEventListener('keydown', onCineKey, true);
+
+    // ---- Wave J components: minimap (J2), projections (J4), timeline track (J3) ----
+    const minimap = (!caps.readOnly && ns.Minimap) ? new ns.Minimap(stage, { renderer }) : null;
+    const projectionView = ns.ProjectionView ? new ns.ProjectionView(stage, { renderer }) : null;
+    let tlInstrument = null;
+    if (controls && ns.TimelineInstrument) {
+      const wrap = rootEl.querySelector('.cinema-scrubber-wrap');
+      if (wrap) tlInstrument = new ns.TimelineInstrument(wrap);
+    }
 
     // ---- Scene wiring ----
     let unsubscribe = () => {};
@@ -638,6 +684,10 @@
       if (driftActive) exitDrift();
       lastScene = renderer.sceneGraph;
       updateDriftAvailability();
+      // Wave J: refresh clusters (J2), vitals (J1), and the active projection (J4).
+      updateClusters();
+      updateVitals();
+      if (projectionView && projMode !== 'graph') projectionView.render(renderer.sceneGraph);
       // Re-arm the cinematic shot list for the new scene (G1); a first-timer gets
       // the once-ever spotlight (G3).
       if (cinematic) { cinematic.exit(); cinematic.setShots(getEvents(), renderer.sceneGraph); }
@@ -692,8 +742,8 @@
     updateSummary();
     buildDisclosureDial();
 
-    // Status loop.
-    const statusTimer = setInterval(() => updateStatus(renderer, status), 500);
+    // Status loop (raw telemetry fallback) + vitals posture (J1).
+    const statusTimer = setInterval(() => { updateStatus(renderer, status); updateVitals(); }, 500);
 
     return {
       mode, caps, renderer, get dataSource() { return dataSource; }, timeline, controls, legend, exporter, details, proofPanel,
@@ -714,6 +764,10 @@
         if (summaryRibbon) summaryRibbon.destroy();
         if (spotlight) spotlight.destroy();
         if (verifyTheatre) verifyTheatre.destroy();
+        if (minimap) minimap.destroy();
+        if (projectionView) projectionView.destroy();
+        if (tlInstrument) tlInstrument.destroy();
+        if (vitalsStrip) vitalsStrip.destroy();
         if (bloomTimer) clearTimeout(bloomTimer);
         document.removeEventListener('keydown', onCineKey, true);
         if (sync) sync.destroy();

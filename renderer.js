@@ -91,6 +91,9 @@ class CinemaRenderer {
         this._tracePath = null;
         // Drift edges (I1): [{fromId(ghost), toId(actual), drift}] for plan-vs-actual.
         this._driftEdges = null;
+        // Semantic clustering LOD (J2): below _lodZoom, draw clusters not nodes.
+        this._clusters = null;
+        this._lodZoom = 0.4;
         // Motion hierarchy (D2): reduced-motion flag + the single attention node.
         this.reducedMotion = rendererReducedMotion();
         this._attentionFocus = null;
@@ -156,6 +159,36 @@ class CinemaRenderer {
 
     /** setDriftEdges draws predicted→actual divergence edges (I1). */
     setDriftEdges(edges) { this._driftEdges = (edges && edges.length) ? edges : null; this._dirty = true; }
+
+    /** setClusters supplies the overview clustering (J2); shown below _lodZoom. */
+    setClusters(c) { this._clusters = (c && c.clusters && c.clusters.length) ? c : null; this._dirty = true; }
+    _clusterLOD() { return !!(this._clusters && this.camera.zoom < this._lodZoom); }
+    _drawClusters() {
+        const ctx = this.ctx;
+        const { clusters, clusterEdges } = this._clusters;
+        const byId = new Map();
+        for (const c of clusters) byId.set(c.id, c);
+        for (const e of (clusterEdges || [])) {
+            const a = byId.get(e.fromId), b = byId.get(e.toId);
+            if (!a || !b) continue;
+            ctx.beginPath();
+            ctx.moveTo(a.position.x, a.position.y); ctx.lineTo(b.position.x, b.position.y);
+            ctx.strokeStyle = 'rgba(120,150,200,0.4)';
+            ctx.lineWidth = Math.min(10, 1 + e.count * 0.5);
+            ctx.stroke();
+        }
+        for (const c of clusters) {
+            const rr = 14 + Math.min(44, Math.sqrt(c.count) * 9);
+            ctx.beginPath(); ctx.arc(c.position.x, c.position.y, rr, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(60,80,140,0.85)'; ctx.fill();
+            ctx.strokeStyle = 'rgba(140,170,230,0.9)'; ctx.lineWidth = 2; ctx.stroke();
+            const fs = Math.max(11, 13 / this.camera.zoom);
+            ctx.fillStyle = '#dfe4f2'; ctx.font = `700 ${fs}px ${FONT_UI}`; ctx.textAlign = 'center';
+            ctx.fillText(humanKind(c.label), c.position.x, c.position.y - 2);
+            ctx.font = `${Math.max(10, 11 / this.camera.zoom)}px ${FONT_UI}`; ctx.fillStyle = '#aab2d9';
+            ctx.fillText(c.count + ' nodes', c.position.x, c.position.y + fs);
+        }
+    }
     _indexNodes(graph) {
         const m = new Map();
         if (!graph) return m;
@@ -446,8 +479,10 @@ class CinemaRenderer {
             ctx.globalAlpha = 1.0;
         }
 
-        // Main graph
-        if (this.sceneGraph) {
+        // Main graph — or, at altitude, the semantic clusters (J2 LOD).
+        if (this._clusterLOD()) {
+            this._drawClusters();
+        } else if (this.sceneGraph) {
             this.drawGraph(this.sceneGraph, false);
         }
 
