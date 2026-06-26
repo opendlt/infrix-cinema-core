@@ -20,7 +20,9 @@
   },
   "scripts": {
     "build": "node -e \"process.stdout.write('@infrix/cinema-core: static assets, no build step\\n')\"",
-    "test": "node --test \"*.test.mjs\""
+    "test": "node --test \"*.test.mjs\"",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "keywords": [
     "infrix",

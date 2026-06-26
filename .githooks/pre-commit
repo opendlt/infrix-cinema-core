@@ -1,0 +1,36 @@
+#!/bin/sh
+# infrix-cinema-core — pre-commit hook (reciprocal mirror reminder).
+#
+# This repo is the SINGLE source of truth for the Cinema core. The
+# infrix-extensions browser wallet ships a byte-identical mirror of it. When a
+# commit here changes a browser-mountable asset (.js/.css, incl. loader.js which
+# drives the extension's script load order; excluding *.test.mjs), remind the
+# developer to re-mirror into the extension.
+#
+# NON-BLOCKING by design: canonical is independent and must not be gated on a
+# sibling repo's state (the extension may not even be checked out). The
+# extension's own pre-commit hook + CI are the hard gate that enforces parity.
+#
+# Install once per clone:  npm run hooks:install   (sets core.hooksPath)
+
+set -e
+
+changed=$(git diff --cached --name-only | grep -E '\.(js|css)$' | grep -vE '\.test\.[mc]?js$' || true)
+[ -z "$changed" ] && exit 0
+
+root=$(git rev-parse --show-toplevel)
+ext="$root/../infrix-extensions/browser"
+check="$ext/scripts/check-cinema-mirror.mjs"
+
+echo "[pre-commit] cinema-core assets changed — checking the infrix-extensions mirror…"
+if [ -f "$check" ]; then
+  if INFRIX_CINEMA_CORE_SRC="$root" node "$check" >/dev/null 2>&1; then
+    echo "[pre-commit] extension mirror is already in sync."
+  else
+    echo "[pre-commit] NOTE: the infrix-extensions mirror will be STALE after this commit."
+    echo "             Re-mirror:  (cd \"$ext\" && npm run vendor)  then commit the regenerated cinema-core/ + popup.html."
+  fi
+else
+  echo "[pre-commit] (infrix-extensions not found as a sibling — skipping mirror reminder)"
+fi
+exit 0
