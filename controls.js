@@ -1,16 +1,24 @@
 /**
- * Infrix Cinema — canonical control bar + transport (Tier A / A2).
+ * Infrix Cinema — canonical control bar + transport (Tier A / A2, IA pass).
  *
- * One control vocabulary for every surface: a TRANSPORT row (scrubber with
- * per-event ticks, time readout, speed, loop, jump-to-failure) plus the action
- * row (play/step, fit/reset, filter/search, legend, export). The set shown is
- * gated by mode capabilities (embed shows none; proof shows replay + export +
- * legend; nexus/full show everything). This guarantees a control means the same
- * thing wherever Cinema is mounted.
+ * One control vocabulary for every surface, organized so the bar reads as
+ * INTENTIONAL rather than feature-stuffed:
  *
- * Before this, TimelineAdapter tracked currentSeq/totalSeq/speed but the bar
- * rendered no scrubber at all — the spine of a "replay the story" product was
- * missing. The transport row is that spine.
+ *   TRANSPORT row  — the spine: scrubber with per-event ticks, time, speed,
+ *                    loop, jump-to-failure.
+ *   ACTION row     — hero actions always visible (▶ Play story, ✓ Verify, the
+ *                    search box) plus three overflow menus that progressively
+ *                    disclose the rest:
+ *                      View ▾  — how the graph is drawn/framed: view mode,
+ *                                layout engine, projection, fit/reset, minimap.
+ *                      Ask ▾   — reframe for a need: role lens + question chips.
+ *                      ⋯ More  — Plan vs Actual, Legend, Export.
+ *
+ * The set shown is still gated by mode capabilities (embed shows none; proof
+ * shows replay + verify + export; nexus/full show everything) — a control
+ * means the same thing wherever Cinema is mounted. The earlier bar exposed all
+ * ~30 controls at once; grouping them into a hero set + menus is the
+ * information-architecture pass that makes the same power feel calm.
  */
 (function (root) {
   'use strict';
@@ -30,7 +38,15 @@
       this.speed = 1;
       this.loop = false;
       this.position = { cur: 0, total: 0, block: 0 };
+      this._menus = [];          // overflow popovers (View / Ask / More)
+      this._proj = 'graph';
+      this._layout = this.opts.initialLayout || 'auto';
+      this._minimapOn = false;
+      this._lensActive = '';
+      this._chipActive = '';
       this._onKey = null;
+      this._onDocClick = null;
+      this._onDocKey = null;
       this.build();
     }
 
@@ -109,71 +125,23 @@
       bar.setAttribute('role', 'toolbar');
       bar.setAttribute('aria-label', 'Cinema controls');
 
+      // --- Hero actions (always visible) ---
+      // Cinematic autoplay (G1) — the headline "watch it explain itself" action.
+      if (playback) {
+        const story = this.btn('cinema-btn-story', '▶ Play story', 'Play the audit story (cinematic)', () => this.fire('playStory'));
+        story.classList.add('cinema-btn-primary');
+        this._storyBtn = story;
+        bar.appendChild(story);
+      }
+      // "Verify it yourself" (H1) — the moat: re-check the bundle in-browser.
+      if (this.opts.canVerify) {
+        const verify = this.btn('cinema-btn-verify', '✓ Verify', 'Verify this bundle yourself (in your browser)', () => this.fire('verify'));
+        verify.classList.add('cinema-btn-verify');
+        bar.appendChild(verify);
+      }
+
       if (this.caps.controls) {
-        bar.appendChild(this.btn('cinema-btn-fit', '⤢', 'Fit to view', () => this.fire('fit')));
-        bar.appendChild(this.btn('btn-zoom-reset', '⊙', 'Reset zoom', () => this.fire('resetView')));
-
-        // Layout engine selector (A1) — Auto / Spine / Force.
-        const layoutGroup = document.createElement('div');
-        layoutGroup.className = 'cinema-layout-toggle';
-        layoutGroup.setAttribute('role', 'group');
-        layoutGroup.setAttribute('aria-label', 'Layout');
-        const engines = [['auto', 'Auto'], ['spine', 'Spine'], ['force', 'Force']];
-        this._layoutBtns = [];
-        const initial = (this.opts.initialLayout || 'auto');
-        for (const [eng, label] of engines) {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'cinema-layout-btn' + (eng === initial ? ' active' : '');
-          b.dataset.engine = eng;
-          b.textContent = label;
-          b.title = label + ' layout';
-          b.setAttribute('aria-pressed', eng === initial ? 'true' : 'false');
-          b.addEventListener('click', () => { this.setLayout(eng); this.fire('layout', eng); });
-          this._layoutBtns.push(b);
-          layoutGroup.appendChild(b);
-        }
-        bar.appendChild(layoutGroup);
-
-        // Alternative projections (J4) — Graph / Flow / Matrix.
-        const projGroup = document.createElement('div');
-        projGroup.className = 'cinema-proj-toggle';
-        projGroup.setAttribute('role', 'group');
-        projGroup.setAttribute('aria-label', 'Projection');
-        this._projBtns = [];
-        for (const [pmode, label] of [['graph', 'Graph'], ['sankey', 'Flow'], ['matrix', 'Matrix']]) {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'cinema-proj-btn' + (pmode === 'graph' ? ' active' : '');
-          b.dataset.proj = pmode;
-          b.textContent = label;
-          b.setAttribute('aria-pressed', pmode === 'graph' ? 'true' : 'false');
-          b.addEventListener('click', () => {
-            for (const x of this._projBtns) { const on = x.dataset.proj === pmode; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); }
-            this.fire('projection', pmode);
-          });
-          this._projBtns.push(b);
-          projGroup.appendChild(b);
-        }
-        bar.appendChild(projGroup);
-
-        // Role lens (K1) — reframe the same scene for a role.
-        if (ns.LENSES) {
-          const lensWrap = document.createElement('label');
-          lensWrap.className = 'cinema-lens-wrap';
-          const lt = document.createElement('span'); lt.className = 'cinema-lens-label'; lt.textContent = 'Lens';
-          const sel = document.createElement('select'); sel.id = 'cinema-lens'; sel.className = 'cinema-lens-select';
-          const none = document.createElement('option'); none.value = ''; none.textContent = 'All'; sel.appendChild(none);
-          for (const role of ['auditor', 'operator', 'regulator', 'agentDev']) {
-            const o = document.createElement('option'); o.value = role; o.textContent = (ns.LENSES[role] && ns.LENSES[role].label) || role; sel.appendChild(o);
-          }
-          sel.addEventListener('change', () => this.fire('lens', sel.value));
-          this._lensSel = sel;
-          lensWrap.appendChild(lt); lensWrap.appendChild(sel);
-          bar.appendChild(lensWrap);
-        }
-
-        // Power search (B4): kind:/status:/gas: grammar + result count + stepper.
+        // --- Power search (B4): kind:/status:/gas: grammar + count + stepper. ---
         const sWrap = document.createElement('div');
         sWrap.className = 'cinema-search-wrap';
         const search = document.createElement('input');
@@ -208,58 +176,255 @@
 
         bar.appendChild(sWrap);
 
-        // Question-based smart chips (K2) — one-tap answers over the scene.
-        if (ns.SMART_FILTERS) {
-          const chips = document.createElement('div');
-          chips.className = 'cinema-smart-chips';
-          this._smartChips = new Map();
-          for (const f of ns.SMART_FILTERS) {
-            const c = document.createElement('button');
-            c.type = 'button'; c.className = 'cinema-smart-chip'; c.dataset.smart = f.id; c.textContent = f.label;
-            c.addEventListener('click', () => this.fire('smartFilter', f.id));
-            this._smartChips.set(f.id, c);
-            chips.appendChild(c);
+        // --- View ▾ — how the graph is drawn and framed. ---
+        const viewMenu = this._makeMenu('cinema-menu-view', 'View', 'View — layout, projection, framing');
+        bar.appendChild(viewMenu.wrap);
+
+        // View mode (graph | narrative | split) — was a floating top-left toggle.
+        if (this.opts.showViewMode !== false) {
+          const sec = this._section(viewMenu.panel, 'Panels');
+          const group = document.createElement('div');
+          group.className = 'cinema-view-toggle';
+          group.setAttribute('role', 'group');
+          group.setAttribute('aria-label', 'View mode');
+          this._viewBtns = [];
+          const initialView = this.opts.initialView || 'split';
+          for (const [m, label] of [['graph', 'Graph'], ['narrative', 'Story'], ['split', 'Split']]) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cinema-view-btn' + (m === initialView ? ' active' : '');
+            b.dataset.view = m;
+            b.textContent = label;
+            b.setAttribute('aria-pressed', m === initialView ? 'true' : 'false');
+            b.addEventListener('click', () => this.fire('setView', m));
+            this._viewBtns.push(b);
+            group.appendChild(b);
           }
-          bar.appendChild(chips);
+          sec.appendChild(group);
         }
-      }
 
-      // Cinematic autoplay (G1) — the headline "watch it explain itself" action.
-      if (this.caps.controls && (this.caps.live || this.caps.replay)) {
-        const story = this.btn('cinema-btn-story', '▶ Play story', 'Play the audit story (cinematic)', () => this.fire('playStory'));
-        story.classList.add('cinema-btn-primary');
-        this._storyBtn = story;
-        bar.appendChild(story);
-      }
+        // Layout engine selector (A1) — Auto / Spine / Force.
+        {
+          const sec = this._section(viewMenu.panel, 'Layout');
+          const layoutGroup = document.createElement('div');
+          layoutGroup.className = 'cinema-layout-toggle';
+          layoutGroup.setAttribute('role', 'group');
+          layoutGroup.setAttribute('aria-label', 'Layout');
+          const engines = [['auto', 'Auto'], ['spine', 'Spine'], ['force', 'Force']];
+          this._layoutBtns = [];
+          for (const [eng, label] of engines) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cinema-layout-btn' + (eng === this._layout ? ' active' : '');
+            b.dataset.engine = eng;
+            b.textContent = label;
+            b.title = label + ' layout';
+            b.setAttribute('aria-pressed', eng === this._layout ? 'true' : 'false');
+            b.addEventListener('click', () => { this.setLayout(eng); this.fire('layout', eng); });
+            this._layoutBtns.push(b);
+            layoutGroup.appendChild(b);
+          }
+          sec.appendChild(layoutGroup);
+        }
 
-      // "Verify it yourself" (H1) — the moat: re-check the bundle in-browser.
-      if (this.opts.canVerify) {
-        const verify = this.btn('cinema-btn-verify', '✓ Verify', 'Verify this bundle yourself (in your browser)', () => this.fire('verify'));
-        verify.classList.add('cinema-btn-verify');
-        bar.appendChild(verify);
-      }
+        // Alternative projections (J4) — Graph / Flow / Matrix.
+        {
+          const sec = this._section(viewMenu.panel, 'Projection');
+          const projGroup = document.createElement('div');
+          projGroup.className = 'cinema-proj-toggle';
+          projGroup.setAttribute('role', 'group');
+          projGroup.setAttribute('aria-label', 'Projection');
+          this._projBtns = [];
+          for (const [pmode, label] of [['graph', 'Graph'], ['sankey', 'Flow'], ['matrix', 'Matrix']]) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cinema-proj-btn' + (pmode === 'graph' ? ' active' : '');
+            b.dataset.proj = pmode;
+            b.textContent = label;
+            b.setAttribute('aria-pressed', pmode === 'graph' ? 'true' : 'false');
+            b.addEventListener('click', () => { this.setProjection(pmode); this.fire('projection', pmode); });
+            this._projBtns.push(b);
+            projGroup.appendChild(b);
+          }
+          sec.appendChild(projGroup);
+        }
 
-      // Plan vs Actual (I1) — shown only when a captured plan is present.
-      if (this.caps.controls) {
-        const drift = this.btn('cinema-btn-drift', '⧉ Plan vs Actual', 'Compare what was predicted with what actually happened', () => this.fire('toggleDrift'));
-        drift.classList.add('hidden');
+        // Framing — fit / reset / minimap.
+        {
+          const sec = this._section(viewMenu.panel, 'Frame');
+          const row = document.createElement('div');
+          row.className = 'cinema-menu-row';
+          row.appendChild(this.btn('cinema-btn-fit', 'Fit to view', 'Fit to view', () => this.fire('fit')));
+          row.appendChild(this.btn('btn-zoom-reset', 'Reset zoom', 'Reset zoom', () => this.fire('resetView')));
+          sec.appendChild(row);
+          const mini = this.btn('cinema-btn-minimap', 'Minimap', 'Toggle the minimap navigator', () => {
+            this.setMinimapActive(!this._minimapOn);
+            this.fire('toggleMinimap', this._minimapOn);
+          });
+          mini.classList.add('cinema-toggle-btn');
+          this._minimapBtn = mini;
+          sec.appendChild(mini);
+        }
+
+        // --- Ask ▾ — reframe the same scene for a need (lens + question chips). ---
+        const hasLens = !!ns.LENSES;
+        const hasChips = !!(ns.SMART_FILTERS && ns.SMART_FILTERS.length);
+        if (hasLens || hasChips) {
+          const askMenu = this._makeMenu('cinema-menu-ask', 'Ask', 'Ask — reframe for your role or a question');
+          bar.appendChild(askMenu.wrap);
+          this._askMenu = askMenu;
+
+          // Role lens (K1) — reframe the same scene for a role.
+          if (hasLens) {
+            const sec = this._section(askMenu.panel, 'View as role');
+            const lensWrap = document.createElement('label');
+            lensWrap.className = 'cinema-lens-wrap';
+            const sel = document.createElement('select'); sel.id = 'cinema-lens'; sel.className = 'cinema-lens-select';
+            const none = document.createElement('option'); none.value = ''; none.textContent = 'Everyone'; sel.appendChild(none);
+            for (const role of ['auditor', 'operator', 'regulator', 'agentDev']) {
+              const o = document.createElement('option'); o.value = role; o.textContent = (ns.LENSES[role] && ns.LENSES[role].label) || role; sel.appendChild(o);
+            }
+            sel.addEventListener('change', () => this.fire('lens', sel.value));
+            this._lensSel = sel;
+            lensWrap.appendChild(sel);
+            sec.appendChild(lensWrap);
+          }
+
+          // Question-based smart chips (K2) — one-tap answers over the scene.
+          if (hasChips) {
+            const sec = this._section(askMenu.panel, 'Quick questions');
+            const chips = document.createElement('div');
+            chips.className = 'cinema-smart-chips';
+            this._smartChips = new Map();
+            for (const f of ns.SMART_FILTERS) {
+              const c = document.createElement('button');
+              c.type = 'button'; c.className = 'cinema-smart-chip'; c.dataset.smart = f.id; c.textContent = f.label;
+              c.addEventListener('click', () => this.fire('smartFilter', f.id));
+              this._smartChips.set(f.id, c);
+              chips.appendChild(c);
+            }
+            sec.appendChild(chips);
+          }
+        }
+
+        // --- ⋯ More — Plan vs Actual, Legend, Export. ---
+        const moreMenu = this._makeMenu('cinema-menu-more', '⋯', 'More — compare, legend, export', { compact: true });
+        bar.appendChild(moreMenu.wrap);
+
+        // Plan vs Actual (I1) — enabled only when a captured plan is present.
+        const drift = this.btn('cinema-btn-drift', '⧉ Plan vs Actual', 'Compare what was predicted with what actually happened', () => { this._closeMenus(); this.fire('toggleDrift'); });
+        drift.classList.add('cinema-menu-item');
+        drift.disabled = true;
         this._driftBtn = drift;
-        bar.appendChild(drift);
-      }
+        moreMenu.panel.appendChild(drift);
 
-      bar.appendChild(this.btn('cinema-btn-legend', 'Legend', 'Toggle legend', () => this.fire('toggleLegend')));
-      if (this.caps.controls || this.caps.replay) {
-        bar.appendChild(this.btn('btn-screenshot', 'Export', 'Export / share', () => this.fire('export')));
+        const legendBtn = this.btn('cinema-btn-legend', 'Legend', 'Toggle legend', () => { this._closeMenus(); this.fire('toggleLegend'); });
+        legendBtn.classList.add('cinema-menu-item');
+        moreMenu.panel.appendChild(legendBtn);
+
+        const exportBtn = this.btn('btn-screenshot', 'Export / share', 'Export / share', () => { this._closeMenus(); this.fire('export'); });
+        exportBtn.classList.add('cinema-menu-item');
+        moreMenu.panel.appendChild(exportBtn);
       }
 
       this.el = bar;
       if (this.host) this.host.appendChild(bar);
+
+      // Dismiss any open menu on outside click / Escape.
+      if (this._menus.length) {
+        this._onDocClick = () => this._closeMenus();
+        this._onDocKey = (e) => { if (e.key === 'Escape') this._closeMenus(); };
+        document.addEventListener('click', this._onDocClick);
+        document.addEventListener('keydown', this._onDocKey);
+      }
 
       // Keyboard transport (Space / arrows / Home / End), ignored while typing.
       if (playback) {
         this._onKey = (e) => this._handleKey(e);
         document.addEventListener('keydown', this._onKey);
       }
+    }
+
+    // ---- Overflow-menu primitive ----------------------------------------
+    _makeMenu(id, label, title, opts) {
+      opts = opts || {};
+      const wrap = document.createElement('div');
+      wrap.className = 'cinema-menu';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = id;
+      btn.className = 'cinema-btn cinema-menu-btn' + (opts.compact ? ' cinema-menu-btn-compact' : '');
+      btn.title = title;
+      btn.setAttribute('aria-label', title);
+      btn.setAttribute('aria-haspopup', 'true');
+      btn.setAttribute('aria-expanded', 'false');
+      const lab = document.createElement('span'); lab.className = 'cinema-menu-label'; lab.textContent = label;
+      btn.appendChild(lab);
+      if (!opts.compact) {
+        const car = document.createElement('span'); car.className = 'cinema-menu-caret'; car.textContent = '▾'; car.setAttribute('aria-hidden', 'true');
+        btn.appendChild(car);
+      }
+
+      const panel = document.createElement('div');
+      panel.className = 'cinema-menu-panel hidden';
+      panel.setAttribute('role', 'group');
+      panel.setAttribute('aria-label', title);
+
+      const menu = { wrap, btn, panel, open: false };
+      btn.addEventListener('click', (e) => { e.stopPropagation(); this._toggleMenu(menu); });
+      panel.addEventListener('click', (e) => e.stopPropagation());
+      wrap.appendChild(btn); wrap.appendChild(panel);
+      this._menus.push(menu);
+      return menu;
+    }
+
+    _toggleMenu(menu) {
+      const willOpen = !menu.open;
+      this._closeMenus();
+      if (willOpen) {
+        menu.open = true;
+        menu.panel.classList.remove('hidden');
+        menu.btn.setAttribute('aria-expanded', 'true');
+        menu.btn.classList.add('open');
+      }
+    }
+
+    _closeMenus() {
+      for (const m of this._menus) {
+        if (!m.open && m.panel.classList.contains('hidden')) continue;
+        m.open = false;
+        m.panel.classList.add('hidden');
+        m.btn.setAttribute('aria-expanded', 'false');
+        m.btn.classList.remove('open');
+      }
+    }
+
+    _section(panel, label) {
+      const s = document.createElement('div');
+      s.className = 'cinema-menu-section';
+      if (label) {
+        const h = document.createElement('div');
+        h.className = 'cinema-menu-section-label';
+        h.textContent = label;
+        s.appendChild(h);
+      }
+      panel.appendChild(s);
+      return s;
+    }
+
+    // Reflect "this menu currently changes the scene" as a dot on its button,
+    // so a collapsed menu still signals that a lens/chip/projection is active.
+    _reflectAsk() {
+      if (!this._askMenu) return;
+      const on = !!(this._lensActive || this._chipActive);
+      this._askMenu.btn.classList.toggle('has-active', on);
+    }
+    _reflectView() {
+      const viewMenu = this._menus[0];
+      if (!viewMenu) return;
+      const on = (this._proj && this._proj !== 'graph') || this._minimapOn;
+      viewMenu.btn.classList.toggle('has-active', on);
     }
 
     _handleKey(e) {
@@ -310,20 +475,60 @@
       if (this._storyBtn) this._storyBtn.textContent = on ? '⏸ Pause story' : '▶ Play story';
     }
 
-    setLens(role) { if (this._lensSel) this._lensSel.value = role || ''; }
+    setLens(role) {
+      if (this._lensSel) this._lensSel.value = role || '';
+      this._lensActive = role || '';
+      this._reflectAsk();
+    }
     setSmartActive(id) {
-      if (!this._smartChips) return;
-      for (const [fid, c] of this._smartChips) c.classList.toggle('active', fid === id);
+      this._chipActive = id || '';
+      if (this._smartChips) for (const [fid, c] of this._smartChips) c.classList.toggle('active', fid === id);
+      this._reflectAsk();
     }
 
-    setDriftAvailable(on) { if (this._driftBtn) this._driftBtn.classList.toggle('hidden', !on); }
+    setProjection(pmode) {
+      this._proj = pmode;
+      for (const b of (this._projBtns || [])) {
+        const on = b.dataset.proj === pmode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+      this._reflectView();
+    }
+
+    setMinimapActive(on) {
+      this._minimapOn = !!on;
+      if (this._minimapBtn) {
+        this._minimapBtn.classList.toggle('active', this._minimapOn);
+        this._minimapBtn.setAttribute('aria-pressed', this._minimapOn ? 'true' : 'false');
+      }
+      this._reflectView();
+    }
+
+    setViewMode(m) {
+      for (const b of (this._viewBtns || [])) {
+        const on = b.dataset.view === m;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+    }
+
+    setDriftAvailable(on) {
+      if (this._driftBtn) {
+        this._driftBtn.disabled = !on;
+        this._driftBtn.title = on
+          ? 'Compare what was predicted with what actually happened'
+          : 'Plan vs Actual — no captured plan in this scene';
+      }
+    }
     setDriftActive(on) {
       if (!this._driftBtn) return;
-      this._driftBtn.classList.toggle('cinema-btn-primary', on);
+      this._driftBtn.classList.toggle('cinema-menu-item-active', on);
       this._driftBtn.textContent = on ? '⧉ Exit compare' : '⧉ Plan vs Actual';
     }
 
     setLayout(engine) {
+      this._layout = engine;
       for (const b of (this._layoutBtns || [])) {
         const on = b.dataset.engine === engine;
         b.classList.toggle('active', on);
@@ -385,6 +590,8 @@
 
     destroy() {
       if (this._onKey) { document.removeEventListener('keydown', this._onKey); this._onKey = null; }
+      if (this._onDocClick) { document.removeEventListener('click', this._onDocClick); this._onDocClick = null; }
+      if (this._onDocKey) { document.removeEventListener('keydown', this._onDocKey); this._onDocKey = null; }
     }
   }
 

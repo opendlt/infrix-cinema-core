@@ -96,6 +96,92 @@
   flex: 1 1 120px;
 }
 
+/* ============================================================
+ * IA pass — overflow menus (View / Ask / More) in the action row.
+ * The action row keeps Play story + Verify + search visible; everything
+ * else lives one click deep in a grouped popover so the bar reads as
+ * intentional instead of a wall of ~30 controls.
+ * ============================================================ */
+.cinema-menu { position: relative; display: inline-flex; }
+/* The menu buttons read obviously as interactive dropdowns: an accent-tinted
+ * border + label, a faint accent fill so they stand off the dark bar, and a
+ * clearly visible caret. They intensify on hover and when open. */
+.cinema-menu-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-weight: 700; letter-spacing: 0.02em;
+  color: var(--cinema-text);
+  background: color-mix(in srgb, var(--cinema-accent) 12%, var(--cinema-panel-2));
+  border-color: color-mix(in srgb, var(--cinema-accent) 55%, var(--cinema-border));
+}
+.cinema-menu-btn:hover {
+  background: color-mix(in srgb, var(--cinema-accent) 24%, var(--cinema-panel-2));
+  border-color: var(--cinema-accent);
+}
+.cinema-menu-btn-compact { padding: 4px 11px; letter-spacing: 0.1em; }
+.cinema-menu-caret { font-size: 10px; color: var(--cinema-accent); opacity: 0.95; }
+.cinema-menu-btn.open {
+  background: color-mix(in srgb, var(--cinema-accent) 28%, var(--cinema-panel-2));
+  border-color: var(--cinema-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cinema-accent) 45%, transparent);
+}
+/* A dot signals a collapsed menu is actively reshaping the scene. */
+.cinema-menu-btn.has-active { position: relative; border-color: color-mix(in srgb, var(--cinema-accent) 55%, var(--cinema-border)); }
+.cinema-menu-btn.has-active::after {
+  content: ''; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--cinema-accent);
+}
+.cinema-menu-panel {
+  position: absolute; bottom: calc(100% + 7px); right: 0; z-index: 20;
+  min-width: 224px; max-width: 320px;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; border-radius: var(--cinema-radius, 9px);
+  background: var(--cinema-panel); border: 1px solid var(--cinema-border);
+  box-shadow: var(--cinema-shadow-3, 0 16px 48px rgba(0,0,0,0.5));
+}
+.cinema-menu-panel.hidden { display: none; }
+.cinema-menu-section { display: flex; flex-direction: column; gap: 6px; }
+.cinema-menu-section-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--cinema-muted);
+}
+.cinema-menu-row { display: flex; gap: 6px; }
+.cinema-menu-row .cinema-btn { flex: 1 1 0; text-align: center; }
+.cinema-menu-panel .cinema-layout-toggle,
+.cinema-menu-panel .cinema-proj-toggle,
+.cinema-menu-panel .cinema-view-toggle { width: 100%; }
+.cinema-menu-panel .cinema-layout-btn,
+.cinema-menu-panel .cinema-proj-btn { flex: 1 1 0; }
+.cinema-menu-panel .cinema-lens-select { width: 100%; }
+.cinema-menu-panel .cinema-smart-chips { gap: 5px; }
+/* Stacked items (More menu + minimap toggle) read as a vertical list. */
+.cinema-menu-item, .cinema-toggle-btn { width: 100%; text-align: left; }
+.cinema-menu-item:disabled { opacity: 0.45; cursor: default; }
+.cinema-menu-item-active { background: var(--cinema-accent); color: var(--cinema-accent-text); border-color: transparent; }
+.cinema-toggle-btn.active { background: var(--cinema-accent); color: var(--cinema-accent-text); border-color: transparent; }
+.cinema-toggle-btn.active::before { content: '✓ '; }
+
+/* ============================================================
+ * IA pass — one calm top strip (posture + summary + disclosure).
+ * Was three chips floating in three corners; now a single centered row.
+ * ============================================================ */
+.cinema-topbar {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 8px; max-width: min(92%, 880px); pointer-events: none;
+}
+.cinema-topbar:empty { display: none; }
+/* Children drop their individual corner-anchoring and sit inline in the row. */
+.cinema-topbar > * {
+  position: static !important; top: auto !important; left: auto !important;
+  right: auto !important; bottom: auto !important; transform: none !important;
+  margin: 0 !important; max-width: none !important; pointer-events: auto;
+}
+.cinema-topbar > .cinema-posture-chip { order: 1; }
+.cinema-topbar > .cinema-summary-ribbon { order: 2; }
+.cinema-topbar > .cinema-disclosure-chip { order: 3; }
+.cinema-disclosure-chip.actionable { cursor: pointer; }
+.cinema-disclosure-chip.actionable:hover { border-color: var(--cinema-accent); }
+
 /* Status bar */
 .cinema-status {
   flex: 0 0 auto;
@@ -279,14 +365,14 @@
 .cinema-narrative-refs { font-size: 0.68rem; color: var(--cinema-text-dim, #9aa0c0); padding: 4px 6px 0; font-family: var(--cinema-mono, monospace); }
 
 /* View-mode toggle (top-left overlay). */
+/* View-mode segmented control — lives inside the controls' "View" menu. */
 .cinema-view-toggle {
-  position: absolute; top: 8px; left: 8px; z-index: 6;
   display: inline-flex; border: 1px solid var(--cinema-border, #2a2c4a); border-radius: 7px; overflow: hidden;
-  background: color-mix(in srgb, var(--cinema-panel-bg, #15162b) 85%, transparent);
 }
 .cinema-view-btn {
   font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-  padding: 4px 9px; border: none; background: transparent; color: var(--cinema-text-dim, #9aa0c0); cursor: pointer;
+  padding: 4px 10px; border: none; background: transparent; color: var(--cinema-text-dim, #9aa0c0); cursor: pointer;
+  flex: 1 1 0;
 }
 .cinema-view-btn.active { background: var(--cinema-accent, #6f6bff); color: var(--cinema-accent-text, #fff); }
 
@@ -489,6 +575,7 @@
 .cinema-disclosure-chip {
   position: absolute; top: 8px; right: 10px; z-index: 6;
   padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  font-family: inherit; line-height: 1.5;
   background: color-mix(in srgb, var(--cinema-panel) 90%, transparent);
   border: 1px solid var(--cinema-disclosure, #ffd700); color: var(--cinema-text);
 }
@@ -686,13 +773,14 @@
 }
 .cinema-drift-only.active { background: var(--cinema-frozen); color: #fff; border-color: transparent; }
 
-/* I2 — disclosure dial (grant preview). */
+/* I2 — disclosure dial (grant preview). Opens on demand from the disclosure
+ * chip in the top strip, dropping just beneath it. */
 .cinema-disclosure-dial {
-  position: absolute; top: 40px; right: 10px; z-index: 6;
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 60%;
-  padding: 5px 8px; border-radius: var(--cinema-radius);
-  background: color-mix(in srgb, var(--cinema-panel) 92%, transparent);
-  border: 1px solid var(--cinema-disclosure, #ffd700); box-shadow: var(--cinema-shadow-1);
+  position: absolute; top: 46px; left: 50%; transform: translateX(-50%); z-index: 8;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: min(92%, 520px);
+  padding: 7px 10px; border-radius: var(--cinema-radius);
+  background: var(--cinema-panel);
+  border: 1px solid var(--cinema-disclosure, #ffd700); box-shadow: var(--cinema-shadow-2);
 }
 .cinema-disclosure-dial.hidden { display: none; }
 .cinema-dial-label { font-size: var(--cinema-fs-xs, 11px); color: var(--cinema-muted); }
@@ -724,11 +812,12 @@ button.cinema-vital:hover { border-color: var(--cinema-border); }
 .cinema-vital.v-trust[data-assurance="witness"] { color: var(--cinema-proof-ok); }
 .cinema-vital.v-trust[data-assurance="replay"] { color: var(--cinema-accent); }
 
-/* J2 — minimap. */
+/* J2 — minimap (off by default; toggled from the View menu). */
 .cinema-minimap {
   position: absolute; right: 10px; bottom: 10px; z-index: 6;
   border: 1px solid var(--cinema-border); border-radius: 6px; box-shadow: var(--cinema-shadow-2); cursor: crosshair;
 }
+.cinema-minimap.hidden { display: none; }
 
 /* J3 — timeline instrument (sits above the scrubber). */
 .cinema-tl-instrument { position: absolute; left: 8px; right: 8px; bottom: 100%; height: 22px; pointer-events: none; }

@@ -53,6 +53,13 @@
     canvas.setAttribute('aria-label', 'Infrix Cinema scene graph — hover to peek, click to pin, drag to pan');
     stage.appendChild(canvas);
 
+    // One calm top strip (IA pass): the trust posture, the self-explaining
+    // scene summary, and the disclosure status all live here in a single
+    // centered row instead of floating in three separate corners.
+    const topbar = el('div', 'cinema-topbar');
+    topbar.id = 'cinema-topbar';
+    stage.appendChild(topbar);
+
     // Details panel (right).
     const detailsPanelEl = el('div', 'cinema-panel panel hidden');
     detailsPanelEl.id = 'details-panel';
@@ -280,19 +287,29 @@
       if (ids.length) sync.highlightNodes(ids); else sync.clearHighlight();
     }
 
-    // Scene-level disclosure summary chip (C2).
-    const discChip = el('div', 'cinema-disclosure-chip hidden');
+    // Scene-level disclosure summary chip (C2). Lives in the top strip; when the
+    // scene carries disclosable sealed values it becomes a button that opens the
+    // grant-preview dial (I2) on demand instead of the dial always being shown.
+    const discChip = document.createElement('button');
+    discChip.type = 'button';
+    discChip.className = 'cinema-disclosure-chip hidden';
     discChip.id = 'cinema-disclosure-chip';
-    stage.appendChild(discChip);
+    discChip.addEventListener('click', () => { if (discChip.classList.contains('actionable')) toggleDisclosureDial(); });
+    topbar.appendChild(discChip);
     function updateDisclosureChip() {
       const g = renderer.sceneGraph;
       let nodes = g ? (Array.isArray(g.nodes) ? g.nodes : Object.values(g.nodes || {})) : [];
       const sealed = nodes.filter((n) => n.redacted).length;
       const disclosable = nodes.filter((n) => n.redacted && n.grantId).length;
       if (sealed > 0) {
-        discChip.textContent = `🔒 ${sealed} sealed` + (disclosable ? ` · ${disclosable} disclosable to you` : '');
+        const canDial = !!(rawScene && grantsInRaw().length);
+        discChip.textContent = `🔒 ${sealed} sealed` + (disclosable ? ` · ${disclosable} disclosable to you` : '') + (canDial ? ' ▾' : '');
+        discChip.classList.toggle('actionable', canDial);
+        discChip.setAttribute('aria-label', canDial
+          ? 'Sealed values — open the grant-preview dial'
+          : `${sealed} sealed value${sealed === 1 ? '' : 's'} in this scene`);
         discChip.classList.remove('hidden');
-      } else { discChip.classList.add('hidden'); }
+      } else { discChip.classList.add('hidden'); if (typeof closeDisclosureDial === 'function') closeDisclosureDial(); }
     }
 
     // Agent-stop ribbon (C3) — shown only for agent-receipt scenes.
@@ -334,9 +351,9 @@
       pulseLadders(c === 'offline' ? 'replay' : c);
       if (proofPanel && proofPanel.el && proofPanel.el.scrollIntoView) proofPanel.el.scrollIntoView({ block: 'nearest' });
     });
-    stage.appendChild(postureChip);
+    topbar.appendChild(postureChip);
 
-    const summaryRibbon = ns.SceneSummaryRibbon ? new ns.SceneSummaryRibbon(stage, { storageKey: 'cinema.summary.' + mode }) : null;
+    const summaryRibbon = ns.SceneSummaryRibbon ? new ns.SceneSummaryRibbon(topbar, { storageKey: 'cinema.summary.' + mode }) : null;
     const spotlight = ns.Spotlight ? new ns.Spotlight(stage, { storageKey: 'cinema.spotlight.seen' }) : null;
     let bloomTimer = null;
 
@@ -455,6 +472,12 @@
     const disclosureDial = el('div', 'cinema-disclosure-dial hidden');
     disclosureDial.id = 'cinema-disclosure-dial';
     stage.appendChild(disclosureDial);
+    let dialReady = false;
+    function toggleDisclosureDial() {
+      if (!dialReady) return;
+      disclosureDial.classList.toggle('hidden');
+    }
+    function closeDisclosureDial() { disclosureDial.classList.add('hidden'); }
     function grantsInRaw() {
       if (!rawScene) return [];
       const nodes = Array.isArray(rawScene.nodes) ? rawScene.nodes : Object.values(rawScene.nodes || {});
@@ -480,7 +503,7 @@
     }
     function buildDisclosureDial() {
       const grants = grantsInRaw();
-      if (!grants.length) { disclosureDial.classList.add('hidden'); return; }
+      if (!grants.length) { dialReady = false; disclosureDial.classList.add('hidden'); return; }
       disclosureDial.replaceChildren();
       const lab = el('span', 'cinema-dial-label'); lab.textContent = 'Preview as grant:'; disclosureDial.appendChild(lab);
       for (const gid of grants) {
@@ -501,7 +524,10 @@
         previewDisclosure();
       });
       disclosureDial.appendChild(reset);
-      disclosureDial.classList.remove('hidden');
+      // Built but kept closed — it opens on demand from the disclosure chip,
+      // so a sealed scene isn't cluttered by an always-open grant dial.
+      dialReady = true;
+      disclosureDial.classList.add('hidden');
     }
 
     // ---- Wave J: vitals (J1), clustering (J2), timeline instrument (J3), projections (J4) ----
@@ -669,9 +695,8 @@
     // toggle is shown wherever there are controls; embed stays canvas-only.
     let viewMode = resolveViewMode(mode, options);
     applyViewMode(rootEl, viewMode);
-    if (caps.controls && !caps.readOnly) {
-      buildViewToggle(rootEl, viewMode, (m) => { viewMode = m; applyViewMode(rootEl, m); persistViewMode(mode, m); });
-    }
+    // The Graph/Story/Split toggle now lives inside the controls' "View" menu
+    // (built below) rather than floating over the top-left of the stage.
 
     // ---- Timeline + export ----
     const timeline = new ns.TimelineAdapter({
@@ -704,6 +729,7 @@
       controls = new ns.CinemaControls(controlsHost, {
         capabilities: caps,
         initialLayout: layoutEngine,
+        initialView: viewMode,
         canVerify: !!(options.proof || caps.proof || (dataSource && dataSource.proof)),
         handlers: {
           togglePlay: () => { timeline.togglePlay(); controls.setPlaying(timeline.state.playing); },
@@ -729,6 +755,8 @@
           projection: (m) => setProjection(m),
           lens: (role) => applyRole(role),
           smartFilter: (id) => applySmartFilter(id),
+          setView: (m) => ctrlSetView(m),
+          toggleMinimap: (on) => { if (minimap) minimap.setVisible(on); },
         },
       });
       // Restore a persisted query so a returning operator keeps their filter.
@@ -953,30 +981,6 @@
     for (const x of VIEW_MODES) rootEl.classList.remove('cinema-view-' + x);
     rootEl.classList.add('cinema-view-' + m);
   }
-  function buildViewToggle(rootEl, current, onChange) {
-    const wrap = el('div', 'cinema-view-toggle');
-    wrap.setAttribute('role', 'group');
-    wrap.setAttribute('aria-label', 'View mode');
-    const labels = [['graph', 'Graph'], ['narrative', 'Narrative'], ['split', 'Split']];
-    const btns = [];
-    for (const [m, label] of labels) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'cinema-view-btn' + (m === current ? ' active' : '');
-      b.dataset.view = m;
-      b.textContent = label;
-      b.setAttribute('aria-pressed', m === current ? 'true' : 'false');
-      b.addEventListener('click', () => {
-        for (const x of btns) { const on = x.dataset.view === m; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); }
-        onChange(m);
-      });
-      btns.push(b);
-      wrap.appendChild(b);
-    }
-    rootEl.appendChild(wrap);
-    return wrap;
-  }
-
   function buildDataSource(mode, options, disclosureContext) {
     const o = Object.assign({}, options, { disclosureContext });
     switch (mode) {

@@ -32,16 +32,26 @@
       this.H = (opts && opts.height) || 112;
       const el = document.createElement('canvas');
       el.className = 'cinema-minimap';
+      // Off by default (J2 is opt-in navigation, not always-on chrome) — the
+      // View menu toggles it. Starting hidden keeps the stage calm.
+      if ((opts || {}).visible === false || (opts && opts.visible == null)) el.classList.add('hidden');
       el.id = 'cinema-minimap';
       el.width = this.W; el.height = this.H;
       el.setAttribute('aria-label', 'Minimap — click to jump');
       this.el = el; this.ctx = el.getContext('2d');
+      this.visible = !el.classList.contains('hidden');
       this._dragging = false;
       this._bindInteraction();
       if (hostEl) hostEl.appendChild(el);
       this._sig = '';
       this._timer = setInterval(() => this._maybeDraw(), 160);
       this._maybeDraw();
+    }
+
+    setVisible(on) {
+      this.visible = !!on;
+      if (this.el) this.el.classList.toggle('hidden', !this.visible);
+      if (this.visible) { this._sig = ''; this._maybeDraw(); }
     }
 
     _project() {
@@ -57,6 +67,8 @@
 
     _maybeDraw() {
       const r = this.renderer; if (!r) return;
+      if (this.el && this.el.classList.contains('hidden')) return; // skip while off
+
       const c = r.camera || {};
       const n = r.sceneGraph ? (r.sceneGraph.nodes ? (Array.isArray(r.sceneGraph.nodes) ? r.sceneGraph.nodes.length : Object.keys(r.sceneGraph.nodes).length) : 0) : 0;
       const sig = n + '|' + Math.round(c.x) + '|' + Math.round(c.y) + '|' + (c.zoom || 0).toFixed(2) + '|' + r.cssWidth + 'x' + r.cssHeight;
