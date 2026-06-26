@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Infrix Cinema — live demo</title>
+<link rel="stylesheet" href="./cinemaTokens.css" />
+<link rel="stylesheet" href="./styles.css" />
+<style>
+  html, body { margin: 0; height: 100%; background: #07070f; color: #d6daea;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  #wrap { display: flex; height: 100vh; }
+  #guide { width: 300px; flex: 0 0 300px; overflow-y: auto; padding: 18px 18px 40px;
+    background: #0c0d1a; border-right: 1px solid #232733; }
+  #guide h1 { font-size: 16px; margin: 0 0 4px; }
+  #guide .sub { font-size: 12px; color: #8b94bd; margin: 0 0 16px; }
+  #guide h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #5cd4e4; margin: 18px 0 6px; }
+  #guide ol { margin: 0; padding-left: 18px; }
+  #guide li { font-size: 12.5px; line-height: 1.5; margin-bottom: 7px; color: #c2c8e0; }
+  #guide b { color: #fff; }
+  #guide kbd { background: #1b2030; border: 1px solid #232733; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+  #stageHost { flex: 1 1 auto; min-width: 0; position: relative; }
+  #cinemaRoot { position: absolute; inset: 0; }
+  #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #8b94bd; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <aside id="guide">
+    <h1>Infrix Cinema</h1>
+    <p class="sub">A live, fully-loaded sample: one governed transfer, end to end, with a portable proof.</p>
+
+    <h2>The "wow" moves</h2>
+    <ol>
+      <li><b>▶ Play story</b> — watch the camera fly through the whole governed action, narrating each step, ending on the gold <b>anchor bloom</b>. <kbd>Esc</kbd> exits.</li>
+      <li><b>✓ Verify</b> — re-checks the bundle <i>in your browser</i>; watch each rung light. Trust you perform, not trust you're told.</li>
+      <li><b>⧉ Plan vs Actual</b> — the plan ghosted under reality, with a red <b>drift edge</b> where step 2 burned 118k gas vs a predicted 42k. Try <b>Drift only</b>.</li>
+      <li><b>Lens</b> (top bar) — pick <b>Regulator</b> / <b>Auditor</b> / <b>Operator</b> to reframe the same scene.</li>
+      <li>Smart chips — tap <b>Frozen or anomalous</b> or <b>Sealed but disclosable</b>.</li>
+    </ol>
+
+    <h2>Look around</h2>
+    <ol>
+      <li>The <b>frame aura</b> + chip up top show the trust ceiling (gold = L0+). It blooms at the anchor.</li>
+      <li>Hover a node to peek; click to pin details; on a node click <b>🔍 Trace / Why?</b> to light its causal chain.</li>
+      <li>The <b>vitals strip</b> (bottom) — click a pip (frozen / anomaly / 🔒) to fly to it.</li>
+      <li><b>Graph / Flow / Matrix</b> toggle — see the same scene as a Sankey or a matrix.</li>
+      <li>Drag the <b>minimap</b> (bottom-right) to navigate; zoom out fully to see <b>clusters</b>.</li>
+      <li>The 🔒 node is <b>provably sealed</b>. Use the gold <b>Preview as grant</b> dial (top-right) to reveal it under a grant.</li>
+      <li>Scrub the <b>timeline</b> — the bars are event density, the colored strip is trust climbing to L0.</li>
+      <li><b>Export ▸ Copy link to this moment</b> — a URL that reopens this exact framed view.</li>
+    </ol>
+    <p class="sub" style="margin-top:18px">Controller is on <code>window.cinema</code> for the console.</p>
+  </aside>
+  <div id="stageHost">
+    <div id="cinemaRoot"></div>
+    <div id="boot">Loading Cinema…</div>
+  </div>
+</div>
+
+<script>
+// Load the canonical core as classic scripts, in dependency order (mirrors loader.js).
+const SCRIPTS = [
+  'visualVocabulary.js','disclosureView.js','renderer.js','dataSources.js','detailsPanel.js',
+  'controls.js','timelineAdapter.js','legend.js','exportPanel.js','trustLadder.js','proofPanel.js',
+  'narrativeTemplates.js','narrativePanel.js','narrativeSync.js','layout.js','cinemaStates.js',
+  'searchQuery.js','tooltip.js','a11y.js','agentRibbon.js','cinematic.js','sceneSummary.js',
+  'verify.js','provenance.js','drift.js','vitals.js','cluster.js','minimap.js','timelineInstrument.js',
+  'projections.js','lens.js','smartFilters.js','momentLink.js','app.js',
+];
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const el = document.createElement('script');
+    el.src = './' + src; el.async = false;
+    el.onload = res; el.onerror = () => rej(new Error('failed to load ' + src));
+    document.head.appendChild(el);
+  });
+}
+
+(async function () {
+  try {
+    for (const s of SCRIPTS) await loadScript(s);
+    mountDemo();
+  } catch (e) {
+    document.getElementById('boot').textContent = 'Load error: ' + e.message + '  (serve over a local web server if file:// is blocked)';
+  }
+})();
+
+function mountDemo() {
+  // ---- a complete sample governed action (no positions → the spine layout runs) ----
+  const scene = {
+    blockHeight: 248113,
+    totalGasUsed: 178000,
+    nodes: [
+      { id: 'intent',   kind: 'intent',        label: 'Transfer 5,000 ACME', actor: 'Treasury bot' },
+      { id: 'policy',   kind: 'policy',         label: 'Regulated-release rule' },
+      { id: 'approver', kind: 'approver',       label: 'Compliance officer' },
+      { id: 'gate',     kind: 'approval_gate',  label: 'Approval gate' },
+      { id: 'vault',    kind: 'contract',       label: 'Settlement vault', stepId: 's1', gasCost: 42000 },
+      { id: 'router',   kind: 'contract',       label: 'FX router', stepId: 's2', gasCost: 118000, breakerState: 'throttled' },
+      { id: 'risk',     kind: 'contract',       label: 'Risk engine', anomalyScore: 0.85 },
+      { id: 'outcome',  kind: 'outcome',        label: 'Committed: 5,000 ACME' },
+      { id: 'evidence', kind: 'evidence',       label: 'Evidence bundle' },
+      { id: 'anchor',   kind: 'anchor',         label: 'Accumulate L0 anchor' },
+      { id: 'sealed',   kind: 'account',        label: 'Counterparty balance', visibility: 'private', url: 'acc://counterparty', grantId: 'grant-audit-7' },
+      // captured plan (predictions) — drives Plan-vs-Actual
+      { id: 'p1', kind: 'ghost_prediction', label: 'Predicted step 1', stepId: 's1', predicted: { gas: 42000 } },
+      { id: 'p2', kind: 'ghost_prediction', label: 'Predicted step 2', stepId: 's2', predicted: { gas: 42000 } },
+    ],
+    edges: [
+      { id: 'e1', fromNodeId: 'intent',  toNodeId: 'policy',   label: 'submit',  gasCost: 1000,  animated: true },
+      { id: 'e2', fromNodeId: 'policy',  toNodeId: 'gate',     label: 'check',   gasCost: 1500 },
+      { id: 'e3', fromNodeId: 'approver',toNodeId: 'gate',     label: 'sign' },
+      { id: 'e4', fromNodeId: 'gate',    toNodeId: 'vault',    label: 'approve', gasCost: 2000 },
+      { id: 'e5', fromNodeId: 'vault',   toNodeId: 'router',   label: 'route',   gasCost: 42000, animated: true },
+      { id: 'e6', fromNodeId: 'router',  toNodeId: 'outcome',  label: 'execute', gasCost: 118000 },
+      { id: 'e7', fromNodeId: 'outcome', toNodeId: 'evidence', label: 'seal' },
+      { id: 'e8', fromNodeId: 'evidence',toNodeId: 'anchor',   label: 'anchor',  animated: true },
+      { id: 'e9', fromNodeId: 'vault',   toNodeId: 'risk',     label: 'assess' },
+      { id: 'e10',fromNodeId: 'router',  toNodeId: 'sealed',   label: 'settle',  visibility: 'private' },
+    ],
+  };
+
+  // a fully-backed portable proof (structural + replay + L0 anchor + witnesses)
+  const proof = {
+    scene: scene,
+    frames: [{ seq: 0, scene: scene }],
+    anchor: { block: 248113, txHash: '0x9f3acb71e2d4', confirmed: true },
+    witness: [{ id: 'w1', signature: 'sig-aaa' }, { id: 'w2', signature: 'sig-bbb' }],
+    assurance: { id: 'witness', label: 'Witness-quorum' },
+  };
+
+  const InfrixCinema = window.InfrixCinema;
+  window.cinema = InfrixCinema.mountCinema({
+    mode: 'cinema.proof',
+    root: document.getElementById('cinemaRoot'),
+    proof: proof,
+    rawScene: scene,            // lets the disclosure dial (I2) preview the grant reveal
+    baseUrl: location.href.split('#')[0],
+    disclosureContext: {},      // anonymous viewer → the counterparty balance stays sealed
+  });
+
+  document.getElementById('boot').style.display = 'none';
+}
+</script>
+</body>
+</html>
