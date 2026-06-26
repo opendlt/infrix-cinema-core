@@ -9,54 +9,54 @@
 <style>
   html, body { margin: 0; height: 100%; background: #07070f; color: #d6daea;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  #wrap { display: flex; height: 100vh; }
-  #guide { width: 300px; flex: 0 0 300px; overflow-y: auto; padding: 18px 18px 40px;
-    background: #0c0d1a; border-right: 1px solid #232733; }
-  #guide h1 { font-size: 16px; margin: 0 0 4px; }
-  #guide .sub { font-size: 12px; color: #8b94bd; margin: 0 0 16px; }
-  #guide h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #5cd4e4; margin: 18px 0 6px; }
-  #guide ol { margin: 0; padding-left: 18px; }
-  #guide li { font-size: 12.5px; line-height: 1.5; margin-bottom: 7px; color: #c2c8e0; }
-  #guide b { color: #fff; }
-  #guide kbd { background: #1b2030; border: 1px solid #232733; border-radius: 4px; padding: 0 4px; font-size: 11px; }
-  #stageHost { flex: 1 1 auto; min-width: 0; position: relative; }
+  /* Cinema fills the whole window — exactly how it mounts in a host. */
+  #stageHost { position: fixed; inset: 0; }
   #cinemaRoot { position: absolute; inset: 0; }
   #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #8b94bd; font-size: 13px; }
+  /* A small, dismissible guide overlay (NOT part of Cinema) — toggle with the ⓘ button. */
+  #guideBtn { position: fixed; top: 10px; right: 12px; z-index: 50; cursor: pointer;
+    background: #141821; color: #d6daea; border: 1px solid #232733; border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; font-weight: 600; }
+  #guide { position: fixed; top: 46px; right: 12px; z-index: 50; width: 320px; max-height: 80vh; overflow-y: auto;
+    padding: 16px 18px; background: rgba(12,13,26,0.97); border: 1px solid #232733; border-radius: 10px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+  #guide.hidden { display: none; }
+  #guide h1 { font-size: 15px; margin: 0 0 4px; }
+  #guide .sub { font-size: 12px; color: #8b94bd; margin: 0 0 12px; }
+  #guide h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #5cd4e4; margin: 14px 0 5px; }
+  #guide ol { margin: 0; padding-left: 17px; }
+  #guide li { font-size: 12px; line-height: 1.45; margin-bottom: 6px; color: #c2c8e0; }
+  #guide b { color: #fff; }
+  #guide kbd { background: #1b2030; border: 1px solid #232733; border-radius: 4px; padding: 0 4px; font-size: 11px; }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <aside id="guide">
-    <h1>Infrix Cinema</h1>
-    <p class="sub">A live, fully-loaded sample: one governed transfer, end to end, with a portable proof.</p>
-
-    <h2>The "wow" moves</h2>
-    <ol>
-      <li><b>▶ Play story</b> — watch the camera fly through the whole governed action, narrating each step, ending on the gold <b>anchor bloom</b>. <kbd>Esc</kbd> exits.</li>
-      <li><b>✓ Verify</b> — re-checks the bundle <i>in your browser</i>; watch each rung light. Trust you perform, not trust you're told.</li>
-      <li><b>⧉ Plan vs Actual</b> — the plan ghosted under reality, with a red <b>drift edge</b> where step 2 burned 118k gas vs a predicted 42k. Try <b>Drift only</b>.</li>
-      <li><b>Lens</b> (top bar) — pick <b>Regulator</b> / <b>Auditor</b> / <b>Operator</b> to reframe the same scene.</li>
-      <li>Smart chips — tap <b>Frozen or anomalous</b> or <b>Sealed but disclosable</b>.</li>
-    </ol>
-
-    <h2>Look around</h2>
-    <ol>
-      <li>The <b>frame aura</b> + chip up top show the trust ceiling (gold = L0+). It blooms at the anchor.</li>
-      <li>Hover a node to peek; click to pin details; on a node click <b>🔍 Trace / Why?</b> to light its causal chain.</li>
-      <li>The <b>vitals strip</b> (bottom) — click a pip (frozen / anomaly / 🔒) to fly to it.</li>
-      <li><b>Graph / Flow / Matrix</b> toggle — see the same scene as a Sankey or a matrix.</li>
-      <li>Drag the <b>minimap</b> (bottom-right) to navigate; zoom out fully to see <b>clusters</b>.</li>
-      <li>The 🔒 node is <b>provably sealed</b>. Use the gold <b>Preview as grant</b> dial (top-right) to reveal it under a grant.</li>
-      <li>Scrub the <b>timeline</b> — the bars are event density, the colored strip is trust climbing to L0.</li>
-      <li><b>Export ▸ Copy link to this moment</b> — a URL that reopens this exact framed view.</li>
-    </ol>
-    <p class="sub" style="margin-top:18px">Controller is on <code>window.cinema</code> for the console.</p>
-  </aside>
   <div id="stageHost">
     <div id="cinemaRoot"></div>
     <div id="boot">Loading Cinema…</div>
   </div>
-</div>
+  <button id="guideBtn" onclick="document.getElementById('guide').classList.toggle('hidden')">ⓘ Guide</button>
+  <aside id="guide" class="hidden">
+    <h1>Infrix Cinema — demo</h1>
+    <p class="sub">One governed transfer, end to end, with a portable proof. (This guide is demo-only, not part of Cinema.)</p>
+    <h2>The "wow" moves</h2>
+    <ol>
+      <li><b>▶ Play story</b> — the camera flies through the action, narrating, ending on the gold <b>anchor bloom</b>. <kbd>Esc</kbd> exits.</li>
+      <li><b>✓ Verify</b> — re-checks the bundle <i>in your browser</i>; each rung lights.</li>
+      <li><b>⧉ Plan vs Actual</b> — the plan ghosted under reality; a red <b>drift edge</b> where step 2 burned 118k vs a predicted 42k. Try <b>Drift only</b>.</li>
+      <li><b>Lens</b> — Regulator / Auditor / Operator reframe the same scene.</li>
+      <li>Smart chips — <b>Frozen or anomalous</b>, <b>Sealed but disclosable</b>.</li>
+    </ol>
+    <h2>Look around</h2>
+    <ol>
+      <li>The <b>frame aura</b> + chip show the trust ceiling (gold = L0+); it blooms at the anchor.</li>
+      <li>Hover a node to peek; click to pin; <b>🔍 Trace / Why?</b> lights its causal chain.</li>
+      <li><b>Vitals</b> (bottom) — click a pip to fly to it. <b>Graph / Flow / Matrix</b> reproject. Drag the <b>minimap</b>; zoom out for <b>clusters</b>.</li>
+      <li>The 🔒 node is <b>provably sealed</b> — the gold <b>Preview as grant</b> dial reveals it.</li>
+      <li><b>Story / Split</b> view toggle (top-left) shows the narrative panel; <b>Export ▸ Copy link to this moment</b>.</li>
+    </ol>
+    <p class="sub" style="margin-top:14px">Controller is on <code>window.cinema</code>.</p>
+  </aside>
 
 <script>
 // Load the canonical core as classic scripts, in dependency order (mirrors loader.js).
@@ -138,6 +138,7 @@ function mountDemo() {
     proof: proof,
     rawScene: scene,            // lets the disclosure dial (I2) preview the grant reveal
     baseUrl: location.href.split('#')[0],
+    narrativeMode: 'graph',     // start graph-first (toggle to Split/Story when you want the panel)
     disclosureContext: {},      // anonymous viewer → the counterparty balance stays sealed
   });
 
