@@ -1,6 +1,6 @@
 {
   "name": "@infrix/cinema-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Canonical Infrix Cinema visualization core — the single renderer, vocabulary, disclosure view, and mount/loader shared by the Nexus SPA, the browser extension, and the @infrix/cinema-embed SDK widget.",
   "type": "module",
   "license": "MIT",
